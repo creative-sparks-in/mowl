@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OfferingType;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -12,7 +13,7 @@ use Throwable;
 
 class Product extends Model
 {
-    protected $fillable = ['brand_id', 'name', 'price', 'summary'];
+    protected $fillable = ['brand_id', 'name', 'price', 'summary', 'offering_type'];
 
     private static ?bool $archiveAvailable = null;
 
@@ -30,6 +31,12 @@ class Product extends Model
     public function isArchived(): bool
     {
         return $this->archived_at !== null;
+    }
+
+    /** The product's own type when it has one, otherwise its brand's. */
+    public function offeringType(): OfferingType
+    {
+        return OfferingType::tryFrom((string) ($this->offering_type ?? '')) ?? ($this->brand?->offeringType() ?? OfferingType::Physical);
     }
 
     public function brand(): BelongsTo

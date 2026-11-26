@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OfferingType;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -15,10 +16,12 @@ class Brand extends Model
 {
     protected $fillable = [
         'workspace_id', 'name', 'website', 'status', 'banner_logo_disk', 'banner_logo_path',
-        'banner_logo_mime_type', 'primary_color', 'voice', 'default_audience', 'palette',
+        'banner_logo_mime_type', 'primary_color', 'voice', 'default_audience', 'palette', 'offering_type',
     ];
 
     private static ?bool $profileAvailable = null;
+
+    private static ?bool $offeringTypeAvailable = null;
 
     protected function casts(): array
     {
@@ -29,6 +32,18 @@ class Brand extends Model
     public static function profileAvailable(): bool
     {
         return self::$profileAvailable ??= Schema::hasColumn('brands', 'voice');
+    }
+
+    /** As above: the type columns on brands and products arrive together, in one migration. */
+    public static function offeringTypeAvailable(): bool
+    {
+        return self::$offeringTypeAvailable ??= Schema::hasColumn('brands', 'offering_type');
+    }
+
+    /** What the brand sells. Its products are this type unless one says otherwise. */
+    public function offeringType(): OfferingType
+    {
+        return OfferingType::of($this->offering_type ?? null);
     }
 
     /**
