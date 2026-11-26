@@ -1,0 +1,67 @@
+/*
+ * Creatives (resources/views/livewire/creative-browser.blade.php): uploads, grid and preview.
+ * The preview reuses the review viewer (.viewer) from content.css.
+ */
+
+.creatives{gap:16px;min-width:0}
+.cr-head{align-items:flex-end;gap:16px}
+.cr-usage{gap:6px;min-width:200px}
+.meter.is-full i{background:var(--bad-fg)}
+
+/* Upload drop zone */
+.cr-drop{display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:var(--radius-card);border:1.5px dashed var(--line-strong);background:var(--surface);transition:background-color .2s,border-color .2s}
+.cr-drop.is-over{border-color:var(--focus);background:var(--rev-bg)}
+.cr-drop-row{gap:14px;flex-wrap:wrap}
+.cr-drop-icon{font-size:28px;color:var(--muted)}
+.cr-drop-text{gap:2px;min-width:200px}
+.cr-upload-product{width:auto;max-width:240px}
+.cr-pick{position:relative;cursor:pointer}
+.cr-pick:focus-within{outline:2px solid var(--focus);outline-offset:2px}
+.cr-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+.cr-uploads{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;max-height:280px;overflow:auto}
+.cr-upload{display:flex;flex-direction:column;gap:6px}
+.cr-upload .row{gap:10px;flex-wrap:nowrap}
+.cr-upload-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr-upload.is-failed .meter i{background:var(--bad-fg)}
+.cr-upload.is-done .meter i{background:var(--ok-fg)}
+.cr-dismiss{width:28px;height:28px;font-size:14px;border-radius:8px}
+
+/* Filters and bulk bar */
+.cr-filters{gap:8px;flex-wrap:wrap}
+.cr-filters .input{width:auto;min-height:36px;padding-top:0;padding-bottom:0}
+.cr-search{flex:1 1 220px;min-width:180px}
+.cr-bulk{flex-wrap:wrap;gap:8px;align-items:center}
+.cr-bulk .input{width:auto;min-height:32px;padding-top:0;padding-bottom:0}
+.cr-bulk-tags{min-width:180px}
+.cr-danger{color:var(--bad-fg)}
+
+/* Grid */
+.cr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+.cr-card-wrap{position:relative;min-width:0}
+.cr-card{width:100%;display:flex;flex-direction:column;gap:4px;align-items:flex-start;padding:8px 8px 12px;border-radius:18px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line);border:0;text-align:left;cursor:pointer;color:var(--ink);font:inherit}
+.cr-card:hover{box-shadow:inset 0 0 0 1px var(--line-strong),var(--shadow)}
+.cr-card:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.cr-thumb{position:relative;display:block;width:100%;aspect-ratio:4/5;margin-bottom:6px;border-radius:var(--radius-thumb);overflow:hidden;background:var(--hero-2)}
+.cr-thumb img,.cr-thumb video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.cr-thumb video{opacity:0;transition:opacity .2s}
+.cr-thumb.is-playing video{opacity:1}
+.cr-placeholder{position:absolute;inset:0;display:grid;place-items:center;color:var(--hero-muted);font-size:34px}
+.cr-badge{position:absolute;bottom:8px;padding:2px 7px;border-radius:var(--radius-pill);background:rgba(0,0,0,.66);color:#fff;font-size:11px;font-weight:500;line-height:18px}
+.cr-badge.is-start{left:8px}
+.cr-badge.is-end{right:8px}
+.cr-title{font-weight:500;font-size:13px;line-height:1.35;overflow-wrap:anywhere;padding:0 4px}
+.cr-meta{padding:0 4px;overflow-wrap:anywhere}
+.cr-card-wrap .sel{position:absolute;top:16px;left:16px;width:20px;height:20px;accent-color:var(--accent)}
+
+/* Preview */
+.cr-player{background:#000}
+.cr-edit{gap:12px}
+.cr-edit .row{gap:8px;flex-wrap:wrap}
+
+@media(prefers-reduced-motion:reduce){.cr-drop,.cr-thumb video{transition:none}}
+@media(max-width:720px){
+    .cr-head{align-items:flex-start;flex-direction:column}
+    .cr-usage{min-width:0;width:100%}
+    .cr-filters .input,.cr-upload-product{flex:1 1 140px;max-width:none}
+    .cr-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+}

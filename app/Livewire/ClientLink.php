@@ -88,7 +88,7 @@ class ClientLink extends Component
         $product = $link->product->load(['brand.workspace', 'resourceLinks', 'mediaAssets']);
         $items = $this->items($product);
         $version = ClientHub::latestApprovedVersion($product);
-        $hub = $version ? ClientHub::build($product, $version, $this->hubLinks()) : null;
+        $hub = $version || ClientHub::library($product)->isNotEmpty() ? ClientHub::build($product, $version, $this->hubLinks()) : null;
         $imageRoute = $this->kind === 'review' ? 'client.review-banner' : 'product-hubs.shared-item-image';
 
         return view('livewire.client-link', [
@@ -116,7 +116,7 @@ class ClientLink extends Component
         return $link;
     }
 
-    /** @return array{media: callable, creative: callable, export: callable} */
+    /** @return array{media: callable, creative: callable, export: callable, library: callable} */
     private function hubLinks(): array
     {
         $prefix = $this->kind === 'review' ? 'client.hub' : 'product-hubs.shared';
@@ -125,6 +125,7 @@ class ClientLink extends Component
             'media' => fn ($asset) => route("{$prefix}-media", [$this->token, $asset]),
             'creative' => fn ($creative) => route("{$prefix}-creative", [$this->token, $creative]),
             'export' => fn ($type) => route("{$prefix}-export", [$this->token, $type]),
+            'library' => fn ($asset, $variant) => route("{$prefix}-library", [$this->token, $asset, $variant]),
         ];
     }
 

@@ -70,6 +70,19 @@ return [
             'report' => true,
         ],
 
+        // Creative library files. Set either the connection string or the account and key.
+        'azure' => [
+            'driver' => 'azure',
+            'connection_string' => env('AZURE_STORAGE_CONNECTION_STRING'),
+            'account' => env('AZURE_STORAGE_ACCOUNT'),
+            'key' => env('AZURE_STORAGE_KEY'),
+            'container' => env('AZURE_STORAGE_CONTAINER'),
+            'url' => env('AZURE_STORAGE_URL'),
+            'prefix' => env('AZURE_STORAGE_PREFIX', ''),
+            'throw' => true,
+            'report' => true,
+        ],
+
     ],
 
     /*

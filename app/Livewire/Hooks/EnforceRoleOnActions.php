@@ -8,6 +8,7 @@ use App\Livewire\ClientLink;
 use App\Livewire\ClientPortal;
 use App\Livewire\ConciergeIndex;
 use App\Livewire\ContentBrowser;
+use App\Livewire\CreativeBrowser;
 use App\Livewire\InboxDrawer;
 use App\Livewire\ProductCampaigns;
 use App\Livewire\ProductHub;
@@ -31,6 +32,7 @@ class EnforceRoleOnActions extends ComponentHook
     private const REVIEWER = [
         ReviewQueue::class => ['select', 'approve', 'requestChanges', 'approveSource'],
         ContentBrowser::class => ['select', 'showTab', 'filter', 'clearFilters', 'addComment'],
+        CreativeBrowser::class => ['select', 'close', 'step', 'loadMore', 'clearFilters'],
         CampaignWorkspace::class => ['selectVersion', 'addComment', 'approveVersion', 'rejectVersion', 'approveSource'],
         ProductHub::class => ['cancelEdit'],
         ProductCampaigns::class => ['show', 'cancelEditing'],

@@ -3,8 +3,10 @@
 namespace App\Support;
 
 use App\Models\CampaignPackVersion;
+use App\Models\CreativeAsset;
 use App\Models\Product;
 use App\Services\CampaignPackSafetyValidator;
+use App\Services\CreativeLibrary;
 use App\Services\ProductHubContentAdapter;
 use Illuminate\Support\Collection;
 
@@ -54,7 +56,7 @@ class ClientHub
     /**
      * Everything the hub body renders. $links builds URLs, so the same body works signed in and on a shared link.
      *
-     * @param  array{media: callable, creative: callable, export: callable}  $links
+     * @param  array{media: callable, creative: callable, export: callable, library?: callable}  $links
      */
     public static function build(Product $product, ?CampaignPackVersion $version, array $links): array
     {
@@ -75,6 +77,16 @@ class ClientHub
                 'headline' => $creative->headline,
                 'layout' => $creative->layout,
             ])->values()->all() : [],
+            'library' => isset($links['library']) ? self::library($product)->map(fn (CreativeAsset $asset) => [
+                'id' => $asset->id,
+                'title' => $asset->title,
+                'kind' => $asset->kind,
+                'meta' => $asset->metaLine(),
+                'duration' => $asset->durationLabel(),
+                'poster' => $asset->poster_path ? ($links['library'])($asset, 'poster') : null,
+                'file' => ($links['library'])($asset, 'file'),
+                'download' => ($links['library'])($asset, 'download'),
+            ])->all() : [],
             'exportUrl' => $links['export'],
             'channels' => $content ? self::channels($content) : [],
             'links' => $product->resourceLinks->sortBy('id')->values(),
@@ -90,6 +102,16 @@ class ClientHub
             ->where('status', 'completed')
             ->filter(fn ($creative) => filled($creative->output_path) && $validator->bannerPrices($creative) === [])
             ->sortBy('sequence')->values();
+    }
+
+    /** Uploaded creatives of the product that are ready to hand over, newest first. */
+    public static function library(Product $product): Collection
+    {
+        if (! CreativeLibrary::available()) {
+            return collect();
+        }
+
+        return $product->creativeAssets()->where('status', 'ready')->whereNull('archived_at')->latest()->orderByDesc('id')->get();
     }
 
     /** Channel copy as lists of non-empty strings, dropping channels with nothing approved. */

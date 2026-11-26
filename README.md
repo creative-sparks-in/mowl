@@ -89,7 +89,14 @@ AWS_DEFAULT_REGION=
 AWS_BUCKET=
 AWS_ENDPOINT=
 AWS_USE_PATH_STYLE_ENDPOINT=true
+
+CREATIVE_LIBRARY_DISK=azure
+AZURE_STORAGE_ACCOUNT=stmarketingowl
+AZURE_STORAGE_KEY=
+AZURE_STORAGE_CONTAINER=creatives
 ```
+
+Creative library files go straight from the browser to the private Azure Blob container with short-lived SAS links, so they never pass through Vercel's 4.5 MB request limit. The container's CORS rules must allow every origin that uploads; add a Vercel preview origin before testing uploads on a preview.
 
 Use the Supabase transaction-pooler connection string for `DB_URL`. Run migrations once against the production database:
 

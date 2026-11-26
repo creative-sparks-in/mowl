@@ -41,6 +41,8 @@
                 <div class="eyebrow">{{ $workspace->isAgency() ? 'Client hub' : 'Ready to use' }}</div>
                 <h1 class="display">{{ $product->name }}</h1>
             </div>
+        @endif
+        @unless($hub['version'] ?? null)
             @if($approved->isNotEmpty())
                 <section class="card col" aria-labelledby="client-approved">
                     <h2 id="client-approved" class="eyebrow">Approved so far · {{ $approved->count() }}</h2>
@@ -52,10 +54,10 @@
                         </div>
                     @endforeach
                 </section>
-            @elseif(! ($canDecide && $pending->isNotEmpty()))
+            @elseif(! $hub && ! ($canDecide && $pending->isNotEmpty()))
                 <div class="empty"><strong>Nothing is ready yet</strong><span class="muted small">{{ $workspace->name }} will share work here as soon as it is ready.</span></div>
             @endif
-        @endif
+        @endunless
 
         <p class="muted xs">This page only shows work that is ready for you. Drafts, costs and internal notes never appear here.</p>
     </main>

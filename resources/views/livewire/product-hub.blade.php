@@ -28,6 +28,13 @@
                         <div class="empty"><strong>Content items turn on after the next database update</strong><span class="small muted">Until then, approved launch packs show in the Client hub tab.</span></div>
                     @endif
                     @break
+                @case('creatives')
+                    @if(\App\Services\CreativeLibrary::available())
+                        <livewire:creative-browser :product-id="$product->id" :key="'creatives-'.$product->id" />
+                    @else
+                        <div class="empty"><strong>Creatives turn on after the next database update</strong><span class="small muted">Launch pack banners stay in the Outputs tab in the meantime.</span></div>
+                    @endif
+                    @break
                 @case('pages')
                     @if(\App\Services\Pages\PageBuilder::available())
                         <livewire:product-pages :product-id="$product->id" :key="'pages-'.$product->id" />

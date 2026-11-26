@@ -8,6 +8,7 @@ use App\Models\ContentItem;
 use App\Models\Page;
 use App\Models\Product;
 use App\Services\ContentLibrary;
+use App\Services\CreativeLibrary;
 use App\Support\ClientHub;
 use App\Support\Membership;
 use Illuminate\Support\Collection;
@@ -82,6 +83,7 @@ class ClientPortal extends Component
             'media' => fn ($asset) => route('portal.hub-media', [$openProduct->id, $asset]),
             'creative' => fn ($creative) => route('portal.hub-creative', [$openProduct->id, $creative]),
             'export' => fn ($type) => route('portal.hub-export', [$openProduct->id, $type]),
+            'library' => fn ($asset, $variant) => route('portal.hub-library', [$openProduct->id, $asset, $variant]),
         ]) : null;
 
         return view('livewire.client-portal', [
@@ -138,12 +140,13 @@ class ClientPortal extends Component
             ->get();
     }
 
-    /** @return Collection<int, Product> products of the brand that have an approved launch pack, so a client hub to open */
+    /** @return Collection<int, Product> products of the brand with an approved launch pack or uploaded creatives, so a client hub to open */
     private function hubProducts(Brand $brand): Collection
     {
         return Product::query()
             ->where('brand_id', $brand->id)
-            ->whereHas('campaignPacks.versions', fn ($query) => $query->where('review_status', 'approved'))
+            ->where(fn ($query) => $query->whereHas('campaignPacks.versions', fn ($versions) => $versions->where('review_status', 'approved'))
+                ->when(CreativeLibrary::available(), fn ($query) => $query->orWhereHas('creativeAssets', fn ($assets) => $assets->where('status', 'ready')->whereNull('archived_at'))))
             ->with(['brand', 'resourceLinks', 'mediaAssets'])
             ->orderBy('name')
             ->get();

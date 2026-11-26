@@ -32,7 +32,7 @@
 .copy-btn{min-width:92px}
 .hub-images{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
 .hub-image{margin:0;display:flex;flex-direction:column;gap:10px}
-.hub-image img{width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:var(--radius-thumb);background:var(--surface-2);display:block}
+.hub-image img,.hub-image video{width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:var(--radius-thumb);background:var(--surface-2);display:block}
 .hub-image figcaption{gap:8px;flex-wrap:nowrap}
 /* Team side of the tab */
 .hub-share,.hub-setup{gap:14px}

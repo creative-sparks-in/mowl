@@ -13,6 +13,7 @@
     $navLink('campaign-packs.index', 'campaign-packs.*', 'Launch packs', 'stack-2', true),
     $navLink('brands.index', 'brands.*', 'Brands', 'building-store'),
     $navLink('library.index', 'library.*', 'Library', 'layout-grid'),
+    $navLink('creatives.index', 'creatives.*', 'Creatives', 'photo-video'),
     $navLink('campaigns.index', 'campaigns.*', 'Campaigns', 'speakerphone'),
     $navLink('workflows.index', 'workflows.*', 'Workflows', 'sparkles'),
 ])

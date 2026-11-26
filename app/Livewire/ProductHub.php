@@ -29,7 +29,7 @@ class ProductHub extends Component
 
     public ?string $shareUrl = null;
 
-    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Outputs', 'pages' => 'Pages', 'campaigns' => 'Campaigns', 'results' => 'Results', 'packs' => 'Launch packs', 'hub' => 'Client hub'];
+    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Outputs', 'creatives' => 'Creatives', 'pages' => 'Pages', 'campaigns' => 'Campaigns', 'results' => 'Results', 'packs' => 'Launch packs', 'hub' => 'Client hub'];
 
     #[Url]
     public string $tab = 'overview';
@@ -92,8 +92,8 @@ class ProductHub extends Component
     public function createShare(): void
     {
         $this->authorizeManager();
-        // The link shows work in review as well as the client hub, so it only needs a launch pack to exist.
-        abort_unless($this->product->campaignPacks()->exists(), 422);
+        // The link shows work in review as well as the client hub, so it only needs a launch pack or an uploaded creative.
+        abort_unless($this->product->campaignPacks()->exists() || ClientHub::library($this->product)->isNotEmpty(), 422);
         $this->product->hubShares()->whereNull('revoked_at')->update(['revoked_at' => now()]);
         $share = $this->product->hubShares()->create([
             'workspace_id' => $this->product->brand->workspace_id,
@@ -240,10 +240,11 @@ class ProductHub extends Component
         $contentItems = ContentLibrary::available() ? $this->product->contentItems()->get(['id', 'title', 'status', 'current_version', 'type', 'campaign_pack_id', 'section']) : null;
         $livePage = PageBuilder::available() ? $this->product->pages()->whereNotNull('live_version')->latest('verified_at')->first() : null;
         $campaigns = CampaignPlanner::available() ? $this->product->campaigns()->withCount('results')->orderByDesc('id')->get() : null;
-        $hub = $this->tab === 'hub' && $version ? ClientHub::build($this->product, $version, [
+        $hub = $this->tab === 'hub' && ($version || ClientHub::library($this->product)->isNotEmpty()) ? ClientHub::build($this->product, $version, [
             'media' => fn ($asset) => route('products.hub-media', [$this->product, $asset]),
             'creative' => fn ($creative) => route('products.hub-creative', [$this->product, $creative]),
             'export' => fn ($type) => route('products.hub-export', [$this->product, $type]),
+            'library' => fn ($asset, $variant) => route('creatives.file', [$asset, $variant]),
         ]) : null;
         $share = $this->product->hubShares()->whereNull('revoked_at')->latest()->first();
         $share = $share?->isActive() ? $share : null;
