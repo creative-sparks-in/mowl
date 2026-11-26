@@ -88,12 +88,27 @@ return [
             'output_text' => 3.00,
             'output_image' => 60.00,
         ],
+        // BANNER_GENERATOR=openai draws with these, on OpenAI or Azure OpenAI (OPENAI_BASE_URL).
+        'openai' => [
+            // Tried in order: a model that answers 429 or 503 (no capacity left this minute) hands the
+            // call to the next one. Azure deployments are named after their models.
+            'models' => array_values(array_filter(array_map('trim', explode(',', env('OPENAI_BANNER_MODELS', 'gpt-image-2,gpt-image-1.5'))))),
+            'quality' => env('OPENAI_BANNER_QUALITY', 'medium'),
+            // OpenAI's list prices, as an estimate: Azure's price page showed no rates for these models.
+            // "input" is the image-input rate; a prompt's few dozen text tokens cost less ($5.00).
+            'prices_per_million' => [
+                'gpt-image-2' => ['input' => 8.00, 'output_text' => 0.00, 'output_image' => 30.00],
+                'gpt-image-1.5' => ['input' => 8.00, 'output_text' => 10.00, 'output_image' => 32.00],
+            ],
+        ],
     ],
     'openai' => [
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
         'model' => env('OPENAI_CAMPAIGN_MODEL', 'gpt-5.4-mini'),
         'fallback_models' => array_values(array_filter(array_map('trim', explode(',', env('OPENAI_CAMPAIGN_FALLBACK_MODELS', ''))))),
         'reasoning_effort' => env('OPENAI_REASONING_EFFORT', 'low'),
+        // Banner image checks; gpt-5.4-mini accepts none, low, medium, high and xhigh.
+        'inspection_reasoning_effort' => env('OPENAI_INSPECTION_REASONING_EFFORT', 'low'),
         'timeout_seconds' => (int) env('OPENAI_TIMEOUT_SECONDS', 120),
         'retry_attempts' => (int) env('OPENAI_RETRY_ATTEMPTS', 3),
         'retry_backoff_ms' => [250, 1000],
