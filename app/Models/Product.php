@@ -52,6 +52,11 @@ class Product extends Model
         return $this->hasMany(MediaAsset::class);
     }
 
+    public function creativeAssets(): HasMany
+    {
+        return $this->hasMany(CreativeAsset::class);
+    }
+
     public function resourceLinks(): HasMany
     {
         return $this->hasMany(ProductResourceLink::class);

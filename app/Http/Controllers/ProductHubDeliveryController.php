@@ -5,11 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\BannerCreative;
 use App\Models\CampaignPackVersion;
 use App\Models\ContentClientLink;
+use App\Models\CreativeAsset;
 use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\ProductHubShare;
 use App\Services\CampaignPackSafetyValidator;
 use App\Services\ContentLibrary;
+use App\Services\CreativeLibrary;
 use App\Services\ProductHubContentAdapter;
 use App\Services\ProductHubCsvExporter;
 use App\Support\ClientHub;
@@ -17,6 +19,7 @@ use App\Support\Membership;
 use App\Support\StoredFile;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Symfony\Component\HttpFoundation\Response as FileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProductHubDeliveryController extends Controller
@@ -35,6 +38,11 @@ class ProductHubDeliveryController extends Controller
     public function reviewLinkCreative(string $token, BannerCreative $bannerCreative): StreamedResponse
     {
         return $this->creativeResponse($this->reviewLinkProduct($token), $bannerCreative);
+    }
+
+    public function reviewLinkLibrary(string $token, CreativeAsset $creativeAsset, string $variant, CreativeLibrary $library): FileResponse
+    {
+        return $this->libraryResponse($this->reviewLinkProduct($token), $creativeAsset, $variant, $library);
     }
 
     private function reviewLinkProduct(string $token): Product
@@ -59,6 +67,11 @@ class ProductHubDeliveryController extends Controller
     public function portalCreative(Request $request, int $productId, BannerCreative $bannerCreative): StreamedResponse
     {
         return $this->creativeResponse($this->portalProduct($request, $productId), $bannerCreative, true);
+    }
+
+    public function portalLibrary(Request $request, int $productId, CreativeAsset $creativeAsset, string $variant, CreativeLibrary $library): FileResponse
+    {
+        return $this->libraryResponse($this->portalProduct($request, $productId), $creativeAsset, $variant, $library);
     }
 
     private function portalProduct(Request $request, int $productId): Product
@@ -108,6 +121,11 @@ class ProductHubDeliveryController extends Controller
         return $this->creativeResponse($this->activeShare($token)->product, $bannerCreative);
     }
 
+    public function sharedLibrary(string $token, CreativeAsset $creativeAsset, string $variant, CreativeLibrary $library): FileResponse
+    {
+        return $this->libraryResponse($this->activeShare($token)->product, $creativeAsset, $variant, $library);
+    }
+
     private function csvResponse(Product $product, string $campaignType, ProductHubContentAdapter $adapter, ProductHubCsvExporter $exporter): Response
     {
         $version = $this->approvedVersion($product);
@@ -152,6 +170,14 @@ class ProductHubDeliveryController extends Controller
             'Cache-Control' => 'private, no-store',
             'X-Content-Type-Options' => 'nosniff',
         ], $explain);
+    }
+
+    /** An uploaded creative of the product, never an archived one. */
+    private function libraryResponse(Product $product, CreativeAsset $asset, string $variant, CreativeLibrary $library): FileResponse
+    {
+        abort_unless($asset->product_id === $product->id && $asset->archived_at === null, 404);
+
+        return $library->deliver($asset, $variant);
     }
 
     private function creativeResponse(Product $product, BannerCreative $creative, bool $explain = false): StreamedResponse

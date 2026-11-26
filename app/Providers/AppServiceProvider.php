@@ -6,10 +6,13 @@ use App\Http\Middleware\EnforceWorkspaceRole;
 use App\Livewire\Hooks\EnforceRoleOnActions;
 use App\Services\GoogleCloudAccessTokenProvider;
 use App\Support\GenerationDeadline;
+use AzureOss\Storage\Blob\BlobServiceClient;
+use AzureOss\Storage\BlobFlysystem\AzureBlobStorageAdapter;
 use Google\Cloud\Storage\StorageClient;
 use Illuminate\Filesystem\FilesystemAdapter as LaravelFilesystemAdapter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
+use League\Flysystem\Config;
 use League\Flysystem\Filesystem;
 use League\Flysystem\GoogleCloudStorage\GoogleCloudStorageAdapter;
 use League\Flysystem\GoogleCloudStorage\UniformBucketLevelAccessVisibility;
@@ -52,6 +55,34 @@ class AppServiceProvider extends ServiceProvider
             );
 
             return new LaravelFilesystemAdapter(new Filesystem($adapter), $adapter, $config);
+        });
+
+        Storage::extend('azure', function ($app, array $config): LaravelFilesystemAdapter {
+            if (! ($config['container'] ?? null) || (! ($config['connection_string'] ?? null) && ! (($config['account'] ?? null) && ($config['key'] ?? null)))) {
+                throw new \RuntimeException('Azure Blob Storage container and credentials must be configured.');
+            }
+
+            $connection = ($config['connection_string'] ?? null) ?: implode(';', array_filter([
+                ($config['url'] ?? null) ? 'BlobEndpoint='.$config['url'] : 'DefaultEndpointsProtocol=https',
+                'AccountName='.$config['account'],
+                'AccountKey='.$config['key'],
+                ($config['url'] ?? null) ? null : 'EndpointSuffix=core.windows.net',
+            ]));
+            $adapter = new AzureBlobStorageAdapter(
+                BlobServiceClient::fromConnectionString($connection)->getContainerClient($config['container']),
+                $config['prefix'] ?? '',
+                visibilityHandling: AzureBlobStorageAdapter::ON_VISIBILITY_IGNORE,
+            );
+            $disk = new LaravelFilesystemAdapter(new Filesystem($adapter), $adapter, $config);
+            // Service SAS links for one blob: read-only for viewing, create and write only for a browser upload in blocks.
+            $disk->buildTemporaryUrlsUsing(fn (string $path, \DateTimeInterface $expiration, array $options) => $adapter->temporaryUrl($path, $expiration, new Config($options)));
+            $disk->buildTemporaryUploadUrlsUsing(fn (string $path, \DateTimeInterface $expiration) => [
+                'url' => $adapter->temporaryUrl($path, $expiration, new Config(['permissions' => 'cw'])),
+                'headers' => [],
+                'blocks' => true,
+            ]);
+
+            return $disk;
         });
     }
 }

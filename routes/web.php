@@ -6,6 +6,7 @@ use App\Http\Controllers\CampaignJobController;
 use App\Http\Controllers\CampaignPackDeliveryController;
 use App\Http\Controllers\ClientPortalController;
 use App\Http\Controllers\ClientReviewController;
+use App\Http\Controllers\CreativeAssetController;
 use App\Http\Controllers\PagePreviewController;
 use App\Http\Controllers\ProductHubDeliveryController;
 use App\Http\Controllers\SandboxStoreController;
@@ -29,6 +30,7 @@ use App\Livewire\CampaignWorkspace;
 use App\Livewire\ClientLink;
 use App\Livewire\ClientPortal;
 use App\Livewire\ConciergeIndex;
+use App\Livewire\CreativeIndex;
 use App\Livewire\HelpIndex;
 use App\Livewire\LibraryIndex;
 use App\Livewire\PageEditor;
@@ -66,6 +68,7 @@ Route::middleware('throttle:120,1')->group(function (): void {
     Route::get('/client/{token}/hub/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'reviewLinkExport'])->name('client.hub-export');
     Route::get('/client/{token}/hub/media/{mediaAsset}', [ProductHubDeliveryController::class, 'reviewLinkMedia'])->name('client.hub-media');
     Route::get('/client/{token}/hub/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'reviewLinkCreative'])->name('client.hub-creative');
+    Route::get('/client/{token}/hub/library/{creativeAsset}/{variant}', [ProductHubDeliveryController::class, 'reviewLinkLibrary'])->whereIn('variant', ['file', 'poster', 'download'])->name('client.hub-library');
 });
 Route::middleware('throttle:120,1')->group(function (): void {
     Route::get('/sandbox-store/{token}', [SandboxStoreController::class, 'home'])->name('sandbox-store.home');
@@ -77,6 +80,7 @@ Route::get('/shared/products/{token}/items/{contentItem}/image', [ClientReviewCo
 Route::get('/shared/products/{token}/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'sharedExport'])->name('product-hubs.shared-export');
 Route::get('/shared/products/{token}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'sharedMedia'])->name('product-hubs.shared-media');
 Route::get('/shared/products/{token}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'sharedCreative'])->name('product-hubs.shared-creative');
+Route::get('/shared/products/{token}/library/{creativeAsset}/{variant}', [ProductHubDeliveryController::class, 'sharedLibrary'])->whereIn('variant', ['file', 'poster', 'download'])->name('product-hubs.shared-library');
 
 // WordPress sends the owner back here with a new application password. Outside the workspace role gate:
 // the workspace comes from the encrypted state and the controller checks ownership of that one.
@@ -102,6 +106,8 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/products/{product}/pages/{page}/preview', [PagePreviewController::class, 'draft'])->scopeBindings()->name('pages.preview');
     Route::get('/products/{product}/page-templates/{template}', [PagePreviewController::class, 'template'])->where('template', '[a-z]+')->name('pages.template-preview');
     Route::get('/library', LibraryIndex::class)->name('library.index');
+    Route::get('/creatives', CreativeIndex::class)->name('creatives.index');
+    Route::get('/creatives/{creativeAsset}/{variant}', CreativeAssetController::class)->whereIn('variant', ['file', 'poster', 'download'])->name('creatives.file');
     Route::get('/review', ReviewQueue::class)->name('review.index');
     Route::get('/campaigns', CampaignIndex::class)->name('campaigns.index');
     Route::get('/campaign-packs', CampaignPackIndex::class)->name('campaign-packs.index');
@@ -126,6 +132,7 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/portal/products/{productId}/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'portalExport'])->whereNumber('productId')->name('portal.hub-export');
     Route::get('/portal/products/{productId}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'portalMedia'])->whereNumber('productId')->name('portal.hub-media');
     Route::get('/portal/products/{productId}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'portalCreative'])->whereNumber('productId')->name('portal.hub-creative');
+    Route::get('/portal/products/{productId}/library/{creativeAsset}/{variant}', [ProductHubDeliveryController::class, 'portalLibrary'])->whereNumber('productId')->whereIn('variant', ['file', 'poster', 'download'])->name('portal.hub-library');
     Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
         ->middleware(['signed', 'throttle:6,1'])
         ->name('campaign-jobs.process');

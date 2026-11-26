@@ -12,7 +12,7 @@
     $clientCanDecide = \App\Livewire\ClientLink::makerCanApprove($linkMaker, $product);
 @endphp
 
-@if($latestPack || $version)
+@if($latestPack || $hub)
     @include('product-hubs.hub-share-card')
 @endif
 
@@ -40,7 +40,8 @@
             </li>
         </ol>
     </section>
-@else
+@endif
+@if($hub)
     <div class="row hub-preview-label">
         <span class="eyebrow grow">{{ $agency ? 'Preview · what your client sees' : 'Ready to use · what people with the link see' }}</span>
         @if($approvedHistory->count() > 1)

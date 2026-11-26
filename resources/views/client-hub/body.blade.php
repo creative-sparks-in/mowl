@@ -35,10 +35,12 @@
             @if($hub['imageUrl'])<img src="{{ $hub['imageUrl'] }}" alt="{{ $hub['productName'] ?? $product->name }}" onerror="this.remove()">@endif
         </div>
         <div class="col grow hub-intro-text">
-            <div class="row hub-meta">
-                <span class="tag ok"><span class="dot"></span>Approved{{ $version ? ' · version '.$version->version : '' }}</span>
-                @if($approvedAt)<span class="muted xs">Approved {{ $approvedAt->format('j M Y') }}</span>@endif
-            </div>
+            @if($version)
+                <div class="row hub-meta">
+                    <span class="tag ok"><span class="dot"></span>Approved · version {{ $version->version }}</span>
+                    @if($approvedAt)<span class="muted xs">Approved {{ $approvedAt->format('j M Y') }}</span>@endif
+                </div>
+            @endif
             <{{ $heading ?? 'h2' }} id="hub-product-name" class="display hub-name">{{ $hub['productName'] ?? $product->name }}</{{ $heading ?? 'h2' }}>
             <p class="muted small">{{ $product->brand->name }}@if($price && $price !== 'Price not supplied') · {{ $price }}@endif</p>
             @if($summary)<p class="hub-summary">{{ $summary }}</p>@endif
@@ -56,6 +58,7 @@
         @if($value || $proof)<a class="chip" href="#hub-message">Key message</a>@endif
         @if($channels)<a class="chip" href="#hub-copy">Ready-to-use copy</a>@endif
         @if($hub['images'])<a class="chip" href="#hub-images">Images · {{ count($hub['images']) }}</a>@endif
+        @if($hub['library'])<a class="chip" href="#hub-library">Creatives · {{ count($hub['library']) }}</a>@endif
         @if($facts)<a class="chip" href="#hub-facts">Product facts</a>@endif
     </nav>
 
@@ -140,6 +143,24 @@
                         <figure class="hub-image">
                             <img src="{{ $image['url'] }}" alt="{{ $image['headline'] ? 'Banner: '.$image['headline'] : 'Approved banner' }}" loading="lazy">
                             <figcaption class="row"><span class="grow small">{{ $image['headline'] ?: 'Banner' }}</span><a class="pill ghost sm" href="{{ $image['url'] }}" download="{{ \Illuminate\Support\Str::slug($hub['productName'] ?? $product->name) }}-banner-{{ $image['id'] }}.png"><i class="ti ti-download" aria-hidden="true"></i>Download</a></figcaption>
+                        </figure>
+                    @endforeach
+                </div>
+            </section>
+        @endif
+
+        @if($hub['library'])
+            <section id="hub-library" class="card col c12" aria-labelledby="hub-library-title">
+                <h3 id="hub-library-title" class="eyebrow">Creatives · {{ count($hub['library']) }}</h3>
+                <div class="hub-images">
+                    @foreach($hub['library'] as $asset)
+                        <figure class="hub-image">
+                            @if($asset['kind'] === 'video')
+                                <video src="{{ $asset['file'] }}" @if($asset['poster']) poster="{{ $asset['poster'] }}" @endif controls playsinline preload="none" aria-label="{{ $asset['title'] }}"></video>
+                            @else
+                                <img src="{{ $asset['poster'] ?? $asset['file'] }}" alt="{{ $asset['title'] }}" loading="lazy">
+                            @endif
+                            <figcaption class="row"><span class="grow small">{{ $asset['title'] }}<br><span class="muted xs">{{ $asset['meta'] }}@if($asset['duration']) · {{ $asset['duration'] }}@endif</span></span><a class="pill ghost sm" href="{{ $asset['download'] }}"><i class="ti ti-download" aria-hidden="true"></i>Download</a></figcaption>
                         </figure>
                     @endforeach
                 </div>
