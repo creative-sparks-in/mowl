@@ -2,6 +2,8 @@
 
 namespace App\Services\Pages\Document;
 
+use App\Enums\OfferingType;
+
 /**
  * Page templates: a look (theme) and a section plan. A new page starts from one, filled from the
  * product brief: confirmed Knowledge, approved launch pack copy, the product page and its photos.
@@ -165,6 +167,7 @@ final class Templates
         $benefits = $brief->lines('benefits');
         $differentiators = $brief->lines('differentiators');
         $short = fn (array $lines, int $max) => array_values(array_filter($lines, fn (string $line) => mb_strlen($line) <= $max));
+        $button = $brief->offeringType() === OfferingType::Physical ? 'Buy now' : $brief->offeringType()->cta();
 
         switch ($type) {
             case 'announcement':
@@ -183,7 +186,7 @@ final class Templates
                     'description' => mb_substr($brief->description(), 0, 600),
                     'price' => (string) $brief->price,
                     'bullets' => array_map(fn (string $line) => ['text' => mb_substr($line, 0, 100)], array_slice($short($bullets, 100), 0, 5)),
-                    'button_label' => 'Buy now',
+                    'button_label' => $button,
                 ];
 
             case 'benefit_strip':
@@ -260,7 +263,7 @@ final class Templates
                 return count($photos) >= 2 ? ['images' => $photos] : null;
 
             case 'cta':
-                return ['heading' => 'Ready for '.self::shortName($name).'?', 'text' => mb_substr($brief->valueProposition(), 0, 400), 'button_label' => 'Buy now', 'show_price' => true];
+                return ['heading' => 'Ready for '.self::shortName($name).'?', 'text' => mb_substr($brief->valueProposition(), 0, 400), 'button_label' => $button, 'show_price' => true];
 
             default:
                 return null;

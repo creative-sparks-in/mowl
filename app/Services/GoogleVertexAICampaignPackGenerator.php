@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Contracts\CampaignPackGenerator;
 use App\Data\GenerationResult;
+use App\Enums\OfferingType;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
@@ -45,7 +46,7 @@ class GoogleVertexAICampaignPackGenerator implements CampaignPackGenerator
     {
         return [
             'systemInstruction' => [
-                'parts' => [['text' => $this->instructions()]],
+                'parts' => [['text' => $this->instructions($product)]],
             ],
             'contents' => [[
                 'role' => 'user',
@@ -119,15 +120,17 @@ class GoogleVertexAICampaignPackGenerator implements CampaignPackGenerator
         }
     }
 
-    private function instructions(): string
+    private function instructions(Product $product): string
     {
-        return CampaignPackBlueprint::instructions();
+        return CampaignPackBlueprint::instructions($product->offeringType());
     }
 
     private function sourcePrompt(Product $product, SourceSnapshot $source, array $page): string
     {
+        $type = $product->offeringType();
         $parts = [
             "PRODUCT NAME\n{$product->name}",
+            ...($type === OfferingType::Physical ? [] : ["OFFERING TYPE\n{$type->productOption()}"]),
             "SUPPLIED PRICE\n".($product->price ?: 'Not supplied'),
             "PRODUCT CONTEXT\n".($product->summary ?: 'Not supplied'),
             "SOURCE URL\n{$source->url}",

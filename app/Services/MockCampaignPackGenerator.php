@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Contracts\CampaignPackGenerator;
 use App\Data\GenerationResult;
+use App\Enums\OfferingType;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
 
@@ -12,6 +13,8 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
     public function generate(Product $product, SourceSnapshot $source, array $page = []): GenerationResult
     {
         $name = $product->name;
+        $type = $product->offeringType();
+        $cta = $type === OfferingType::Physical ? 'Learn more' : $type->adCtas()[0];
         $fact = trim((string) (data_get($page, 'product_truth.description') ?: data_get($page, 'description') ?: $product->summary ?: $name));
         $fact = mb_substr($fact, 0, 280);
         $claimId = 'claim-1';
@@ -71,12 +74,12 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
                     ['name' => 'Careful researchers', 'need' => 'Visible, verifiable details', 'buyer_moment' => 'Checking whether the product fits', 'why_relevant' => 'They respond to proof rather than broad claims.'],
                 ],
             ],
-            'marketing_hub' => $this->marketingHub($product, $source, $fact, $audiences),
+            'marketing_hub' => $this->marketingHub($product, $source, $fact, $audiences, $cta),
             'ranked_angles' => $angles,
             'creative_routes' => [
-                $this->route('route-1', 'Everyday upgrade', 1, $name, 'Routine-led shoppers', 'Setting up a familiar part of the day', 'Warm and practical'),
-                $this->route('route-2', 'Useful details', 2, $name, 'Careful product researchers', 'Comparing the final options', 'Clear and evidence-led'),
-                $this->route('route-3', 'Real buyer moment', 3, $name, 'Intent-led shoppers', 'When the product need becomes immediate', 'Direct and relatable'),
+                $this->route('route-1', 'Everyday upgrade', 1, $name, 'Routine-led shoppers', 'Setting up a familiar part of the day', 'Warm and practical', $cta),
+                $this->route('route-2', 'Useful details', 2, $name, 'Careful product researchers', 'Comparing the final options', 'Clear and evidence-led', $cta),
+                $this->route('route-3', 'Real buyer moment', 3, $name, 'Intent-led shoppers', 'When the product need becomes immediate', 'Direct and relatable', $cta),
             ],
             'offers' => [[
                 'wording' => "Explore {$name} and see whether it fits your routine.",
@@ -129,7 +132,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
         ];
     }
 
-    private function route(string $id, string $name, int $rank, string $productName, string $buyer, string $moment, string $tone): array
+    private function route(string $id, string $name, int $rank, string $productName, string $buyer, string $moment, string $tone, string $cta): array
     {
         $voiceoverLines = [
             'Start with the everyday moment that needs a clearer answer.',
@@ -184,7 +187,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
             'headlines' => ["Meet {$productName}", 'See the useful details'],
             'description_lines' => ['Explore the product page for verified details.'],
             'hashtags' => [],
-            'cta' => 'Learn more',
+            'cta' => $cta,
             'frames' => ['Hook frame', 'Product proof frame', 'CTA frame'],
         ];
 
@@ -226,7 +229,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
         return $content;
     }
 
-    private function marketingHub(Product $product, SourceSnapshot $source, string $fact, array $audiences = []): array
+    private function marketingHub(Product $product, SourceSnapshot $source, string $fact, array $audiences, string $cta): array
     {
         $name = $product->name;
         $headlines = ["Meet {$name}", 'See the useful details', 'A clearer everyday choice', 'Built for the real moment', 'Explore the product'];
@@ -254,7 +257,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
                     'primary_texts' => ["A clear look at {$name}, built around a real buyer moment."],
                     'headlines' => array_slice($headlines, 0, 3),
                     'descriptions' => $descriptions,
-                    'ctas' => ['Learn more'],
+                    'ctas' => [$cta],
                 ],
                 'google_ads' => ['search' => $campaign, 'performance_max' => $campaign, 'display' => $campaign],
                 'email_sms' => [

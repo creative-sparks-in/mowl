@@ -2,6 +2,7 @@
 
 namespace App\Services\Pages\Document;
 
+use App\Enums\OfferingType;
 use App\Models\BannerCreative;
 use App\Models\ContentItem;
 use App\Models\MediaAsset;
@@ -92,6 +93,11 @@ final class ProductBrief
     public function name(): string
     {
         return (string) ($this->facts['name'] ?? $this->subject()->name);
+    }
+
+    public function offeringType(): OfferingType
+    {
+        return $this->product->offeringType();
     }
 
     public function description(): string

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Contracts\CampaignPackGenerator;
 use App\Data\GenerationResult;
+use App\Enums\OfferingType;
 use App\Exceptions\OpenAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
@@ -24,6 +25,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             throw new RuntimeException('OPENAI_API_KEY is not configured. Set an OpenAI key or use Vercel AI Gateway with deployment OIDC.');
         }
 
+        $instructions = $this->instructions($product);
         $userContent = [[
             'type' => 'input_text',
             'text' => $this->sourcePrompt($product, $source, $page),
@@ -36,7 +38,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
                     throw new OpenAIResponseException('openai_time_budget', 'Generation stopped to stay inside the request time limit.'.($lastException ? ' Last error: '.$lastException->getMessage() : ''), true);
                 }
                 try {
-                    [$response, $latency] = $this->send($apiKey, $model, $userContent);
+                    [$response, $latency] = $this->send($apiKey, $model, $instructions, $userContent);
 
                     return $this->resultFromResponse($response, $source, $page, $model, $latency);
                 } catch (OpenAIResponseException $exception) {
@@ -59,7 +61,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         throw $lastException ?? new RuntimeException('OpenAI generation failed before a response was received.');
     }
 
-    private function send(string $apiKey, string $model, array $userContent): array
+    private function send(string $apiKey, string $model, string $instructions, array $userContent): array
     {
         $startedAt = hrtime(true);
 
@@ -67,7 +69,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             $response = Http::withToken($apiKey)
                 ->acceptJson()
                 ->timeout(app(GenerationDeadline::class)->timeout(config('campaigns.openai.timeout_seconds')))
-                ->post(rtrim(config('campaigns.openai.base_url'), '/').'/responses', $this->payload($model, $userContent));
+                ->post(rtrim(config('campaigns.openai.base_url'), '/').'/responses', $this->payload($model, $instructions, $userContent));
         } catch (ConnectionException $exception) {
             throw new OpenAIResponseException('openai_connection_error', 'OpenAI connection failed: '.$exception->getMessage(), true);
         }
@@ -94,7 +96,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             ?: request()->header('x-vercel-oidc-token');
     }
 
-    private function payload(string $model, array $userContent): array
+    private function payload(string $model, string $instructions, array $userContent): array
     {
         return [
             'model' => $model,
@@ -105,7 +107,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
                     'role' => 'developer',
                     'content' => [[
                         'type' => 'input_text',
-                        'text' => $this->instructions(),
+                        'text' => $instructions,
                     ]],
                 ],
                 [
@@ -210,15 +212,17 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         }
     }
 
-    private function instructions(): string
+    private function instructions(Product $product): string
     {
-        return CampaignPackBlueprint::instructions();
+        return CampaignPackBlueprint::instructions($product->offeringType());
     }
 
     private function sourcePrompt(Product $product, SourceSnapshot $source, array $page): string
     {
+        $type = $product->offeringType();
         $parts = [
             "PRODUCT NAME\n{$product->name}",
+            ...($type === OfferingType::Physical ? [] : ["OFFERING TYPE\n{$type->productOption()}"]),
             "SUPPLIED PRICE\n".($product->price ?: 'Not supplied'),
             "PRODUCT CONTEXT\n".($product->summary ?: 'Not supplied'),
             "SOURCE URL\n{$source->url}",

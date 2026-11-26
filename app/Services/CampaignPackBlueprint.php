@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\OfferingType;
+
 class CampaignPackBlueprint
 {
-    public static function instructions(): string
+    public static function instructions(OfferingType $type = OfferingType::Physical): string
     {
-        return <<<'PROMPT'
+        $prompt = <<<'PROMPT'
 You create source-constrained product marketing workspaces for ecommerce teams before they have recorded a video.
 
 Use only facts supported by the supplied product-page source. Facts under TEAM-CONFIRMED FACTS were confirmed by the agency team for this product; treat them as supported, and give their evidence records the source "team_confirmed" with an excerpt copied from TEAM-CONFIRMED FACTS, never the product page URL. Where a team-confirmed value differs from the page, the team-confirmed value wins. Never make a claim more specific than its evidence. In particular, "made, sourced, or packed in India" must never become "handmade in India." Do not invent materials, manufacturing methods, origin, certifications, performance outcomes, health claims, guarantees, scarcity, discounts, reviews, availability, or customer results.
@@ -17,8 +19,15 @@ Voiceover segments must use exact non-overlapping start_seconds and end_seconds,
 
 Every factual statement must have an evidence record classified as directly_supported, supported_paraphrased, too_specific_for_evidence, unsupported, or contradicted_by_source. Every verified fact must point to a safe evidence id. Unsafe claims must remain visible in evidence and compliance_flags but must not be presented as approved copy. Prefer value framing over invented discounts.
 
-Also return a marketing_hub handoff containing product details, key messaging, Meta Ads, Google Ads (Search, Performance Max, and Display), email and SMS, and organic social. Google Ads fields must respect common field-length constraints, use the source product URL as final_url, and never invent sitelinks or promotions. Every CTA must suit buying a physical product online (Shop Now, Buy Now, Order Now, Learn More, or Get Offer only when the source states an offer); never use service or booking CTAs such as Book Now or Sign Up. Write "guaranteed", "warranty" or similar assurance words only when the source uses them.
+Also return a marketing_hub handoff containing product details, key messaging, Meta Ads, Google Ads (Search, Performance Max, and Display), email and SMS, and organic social. Google Ads fields must respect common field-length constraints, use the source product URL as final_url, and never invent sitelinks or promotions. {CTA_RULE} Write "guaranteed", "warranty" or similar assurance words only when the source uses them.
 PROMPT;
+
+        if ($type === OfferingType::Physical) {
+            return str_replace('{CTA_RULE}', 'Every CTA must suit buying a physical product online (Shop Now, Buy Now, Order Now, Learn More, or Get Offer only when the source states an offer); never use service or booking CTAs such as Book Now or Sign Up.', $prompt);
+        }
+
+        return str_replace('{CTA_RULE}', 'Every CTA must suit the offering type below ('.implode(', ', $type->adCtas()).', or Get Offer only when the source states an offer); never use retail CTAs such as Shop Now, Buy Now or Add to Cart.', $prompt)
+            ."\n\n".$type->promptGuidance();
     }
 
     public static function shapeError(array $generated): ?string

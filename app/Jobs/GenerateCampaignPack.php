@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Data\GenerationResult;
+use App\Enums\OfferingType;
 use App\Exceptions\OpenAIResponseException;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\CampaignGenerationJob;
@@ -130,6 +131,8 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ])),
                 $provider, $model ?: 'none', $job->analysis_mode, $section ?: 'full', $section ? ($job->base_version ?: 0) : 0, $knowledge,
                 ...($brief ? [hash('sha256', json_encode($brief))] : []),
+                // Left out for physical products so packs cached before offering types still match.
+                ...($subject->offeringType() === OfferingType::Physical ? [] : [$subject->offeringType()->value]),
             ]));
             $cached = ProcessingCacheEntry::where('cache_key', $cacheKey)
                 ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
@@ -169,7 +172,8 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 : $costs->calculate($result->model ?? '', $result->inputTokens, $result->cachedInputTokens, $result->outputTokens);
 
             $currentPrice = $subject->price;
-            DB::transaction(function () use ($job, $result, $cost, $cached, $section, $currentPrice): void {
+            $type = $subject->offeringType();
+            DB::transaction(function () use ($job, $result, $cost, $cached, $section, $currentPrice, $type): void {
                 $pack = $job->campaignPack()->lockForUpdate()->firstOrFail();
                 $nextVersion = ((int) $pack->versions()->max('version')) + 1;
                 $content = app(CampaignPackFinalizer::class)->finalize($section
@@ -179,7 +183,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                         $result->content,
                         $section,
                     )
-                    : $result->content);
+                    : $result->content, $type);
                 $versionAttributes = [
                     'version' => $nextVersion,
                     'content' => $content,
