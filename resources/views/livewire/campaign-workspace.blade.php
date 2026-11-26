@@ -234,10 +234,10 @@
                             ['title' => "Approve the {$packSections->count()} outputs", 'hint' => "{$sectionsApproved} of {$packSections->count()} approved. Open each one, edit if needed, then approve it.", 'done' => $packSections->isNotEmpty() && $sectionsApproved === $packSections->count(),
                                 'label' => $nextOutput ? ($canReview ? 'Review next output' : 'Open next output') : null,
                                 'url' => $nextOutput ? route('products.show', [$pack->product, 'tab' => 'content', 'item' => $nextOutput->id]) : null],
-                            ['title' => 'Make banners', 'hint' => $bannerStudioAvailable && ! $bannerProductImage
+                            ['title' => 'Make banners', 'hint' => $bannerStudioAvailable && $bannerNeedsPhoto && ! $bannerProductImage
                                     ? 'Optional. Banners need a product photo from the product page, and none was found, so you can share the copy without them.'
-                                    : ($bannerStudioAvailable ? 'Three 4:5 images built from your approved copy and your product photo.' : 'Optional. Banners are not available in this workspace yet.'),
-                                'done' => $bannersMade, 'skip' => ! $bannerStudioAvailable || ! $bannerProductImage, 'label' => 'Go to banners', 'url' => '#banner-studio'],
+                                    : ($bannerStudioAvailable ? ($bannerNeedsPhoto ? 'Three 4:5 images built from your approved copy and your product photo.' : 'Three 4:5 images built from your approved copy.') : 'Optional. Banners are not available in this workspace yet.'),
+                                'done' => $bannersMade, 'skip' => ! $bannerStudioAvailable || ($bannerNeedsPhoto && ! $bannerProductImage), 'label' => 'Go to banners', 'url' => '#banner-studio'],
                             ['title' => $workspace->isAgency() ? 'Share it with your client' : 'Share or download it', 'hint' => $workspace->isAgency() ? 'One link where your client copies approved lines and downloads images.' : 'One link for anyone helping you launch, or copy lines and download images yourself.', 'done' => $shared,
                                 'label' => $workspace->isAgency() ? 'Share with client' : 'Open Share', 'url' => route('products.show', [$pack->product, 'tab' => 'hub'])],
                         ];
@@ -413,7 +413,7 @@
                         @endphp
                         <section id="banner-studio" @class(['pack-section', 'banner-studio', 'is-processing' => $bannerActive]) @if($bannerActive) wire:poll.3s @endif>
                             <div class="section-header banner-studio-header">
-                                <div><span class="section-label">AI BANNER STUDIO</span><h3>Campaign-ready 4:5 creative</h3><p>Marketing Owl uses the first product image captured from the website, then applies your exact approved copy and branding.</p></div>
+                                <div><span class="section-label">AI BANNER STUDIO</span><h3>Campaign-ready 4:5 creative</h3><p>{{ $bannerNeedsPhoto ? 'Marketing Owl uses the first product image captured from the website, then applies your exact approved copy and branding.' : 'Marketing Owl draws a scene for your audience, then applies your exact approved copy and branding.' }}</p></div>
                                 <span class="banner-format">PNG · 1080×1350</span>
                             </div>
 
@@ -423,6 +423,7 @@
                                 <div class="banner-locked"><span>⌁</span><div><strong>Approve the current version to unlock banners</strong><p>Banner copy is taken verbatim from the approved launch pack, so draft and review versions stay locked.</p></div></div>
                             @else
                                 <div class="banner-setup-grid">
+                                    @if($bannerNeedsPhoto)
                                     <div class="banner-setup-card">
                                         <div><span>01 · PRODUCT REFERENCE</span><strong>{{ $bannerProductImage ? 'Captured from product page' : 'No usable source image found' }}</strong><p>Banner generation automatically uses the first valid product image discovered while analyzing the website.</p></div>
                                         @if($bannerProductImage)
@@ -431,6 +432,7 @@
                                             <div class="banner-source-status missing" role="status"><span>IMAGE NOT AVAILABLE</span><strong>The product page did not expose a usable JPEG, PNG, or WebP image.</strong><small>Update the product source URL before generating banners.</small></div>
                                         @endif
                                     </div>
+                                    @endif
 
                                     <form wire:submit="saveBannerBranding" class="banner-setup-card">
                                         <div><span>02 · BRAND OVERLAY</span><strong>{{ $pack->product->brand->banner_logo_path ? 'Logo saved' : 'Wordmark fallback' }}</strong><p>Logo and color are optional. Without a logo, the exact brand name is rendered as a neutral wordmark.</p></div>
@@ -445,9 +447,9 @@
                                 @if(!$includedBannerBatch)
                                     <div class="banner-launch">
                                         <div><span>INCLUDED WITH THIS PACK</span><h4>Three directions, generated automatically</h4><ol><li>Product hero and strongest verified benefit</li><li>Problem / solution using approved positioning</li><li>Lifestyle or usage context for the approved audience</li></ol></div>
-                                        <button type="button" wire:click="generateIncludedBanners" wire:loading.attr="disabled" @disabled(!$bannerProductImage)><span wire:loading.remove wire:target="generateIncludedBanners">Generate 3 banners — included</span><span wire:loading wire:target="generateIncludedBanners">Preparing banners…</span></button>
+                                        <button type="button" wire:click="generateIncludedBanners" wire:loading.attr="disabled" @disabled($bannerNeedsPhoto && !$bannerProductImage)><span wire:loading.remove wire:target="generateIncludedBanners">Generate 3 banners — included</span><span wire:loading wire:target="generateIncludedBanners">Preparing banners…</span></button>
                                     </div>
-                                    @if(!$bannerProductImage)<p class="banner-requirement">A usable product-page image is required before generation.</p>@endif
+                                    @if($bannerNeedsPhoto && !$bannerProductImage)<p class="banner-requirement">A usable product-page image is required before generation.</p>@endif
                                 @else
                                     <div class="banner-gallery" aria-live="polite">
                                         @foreach($bannerCreatives as $creative)

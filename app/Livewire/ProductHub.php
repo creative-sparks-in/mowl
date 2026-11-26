@@ -3,6 +3,8 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Enums\OfferingType;
+use App\Models\Brand;
 use App\Models\CampaignPackVersion;
 use App\Models\Product;
 use App\Models\ProductFact;
@@ -15,6 +17,7 @@ use App\Services\ProductPageFetcher;
 use App\Support\ClientHub;
 use App\Support\Membership;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Throwable;
@@ -38,6 +41,9 @@ class ProductHub extends Component
 
     public string $factValue = '';
 
+    /** The product's own type, or "" to follow its brand. */
+    public string $offeringType = '';
+
     private const RESOURCE_LABELS = [
         'product_page' => 'Product page',
         'brand_guide' => 'Brand guide',
@@ -53,6 +59,7 @@ class ProductHub extends Component
         $workspace = $this->currentWorkspace();
         abort_unless($product->brand()->where('workspace_id', $workspace->id)->exists(), 404);
         $this->product = $product;
+        $this->offeringType = (string) ($product->offering_type ?? '');
         $this->resourceInputs = array_fill_keys(array_keys(self::RESOURCE_LABELS), '');
         foreach ($product->resourceLinks as $link) {
             $this->resourceInputs[$link->kind] = $link->url;
@@ -73,7 +80,7 @@ class ProductHub extends Component
         $validated = $this->validate($rules);
         $workspace = $this->product->brand->workspace;
 
-        foreach (self::RESOURCE_LABELS as $kind => $label) {
+        foreach ($this->resourceLabels() as $kind => $label) {
             $url = trim((string) data_get($validated, "resourceInputs.{$kind}"));
             if ($url === '') {
                 $this->product->resourceLinks()->where('kind', $kind)->delete();
@@ -87,6 +94,16 @@ class ProductHub extends Component
         }
 
         session()->flash('resource-status', 'Resource links saved.');
+    }
+
+    public function saveOfferingType(): void
+    {
+        $this->authorizeManager();
+        abort_unless(Brand::offeringTypeAvailable(), 404);
+        $data = $this->validate(['offeringType' => ['nullable', Rule::enum(OfferingType::class)]]);
+        $before = $this->product->offering_type;
+        $this->product->update(['offering_type' => $data['offeringType'] ?: null]);
+        $this->auditFact('product_offering_type_changed', $this->product, ['before' => $before, 'after' => $this->product->offering_type]);
     }
 
     public function createShare(): void
@@ -189,7 +206,7 @@ class ProductHub extends Component
             $page = $fetcher->fetch($previous->canonical_url ?: $previous->url);
         } catch (Throwable $exception) {
             report($exception);
-            session()->flash('knowledge-error', 'We could not read the product page. Check that it is public and try again.');
+            session()->flash('knowledge-error', 'We could not read the '.mb_strtolower($this->product->offeringType()->pageLabel()).'. Check that it is public and try again.');
 
             return;
         }
@@ -223,7 +240,8 @@ class ProductHub extends Component
         $workspace = $this->currentWorkspace();
         $this->product->load(['brand', 'resourceLinks', 'mediaAssets', 'campaignPacks.versions']);
         $version = $this->latestApprovedVersion();
-        $resourceLabels = self::RESOURCE_LABELS;
+        $resourceLabels = $this->resourceLabels();
+        $offeringTypeAvailable = Brand::offeringTypeAvailable();
         $canManage = $this->canManage();
 
         $knowledgeReady = ProductKnowledge::available();
@@ -249,8 +267,14 @@ class ProductHub extends Component
         $share = $this->product->hubShares()->whereNull('revoked_at')->latest()->first();
         $share = $share?->isActive() ? $share : null;
 
-        return view('livewire.product-hub', compact('workspace', 'version', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems', 'livePage', 'campaigns', 'hub', 'share', 'agency'))
+        return view('livewire.product-hub', compact('workspace', 'version', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems', 'livePage', 'campaigns', 'hub', 'share', 'agency', 'offeringTypeAvailable'))
             ->layout('components.layouts.app')->title($this->product->name.' · '.($tabs[$this->tab] ?? 'Overview'));
+    }
+
+    /** The product page link is named for what the product is; its kind stays "product_page". */
+    private function resourceLabels(): array
+    {
+        return ['product_page' => $this->product->offeringType()->pageLabel()] + self::RESOURCE_LABELS;
     }
 
     private function latestApprovedVersion(): ?CampaignPackVersion

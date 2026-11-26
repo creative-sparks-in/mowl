@@ -35,7 +35,7 @@ class ProductCreateTest extends TestCase
 
         $this->actingAs($user)->get(route('products.create'))
             ->assertOk()
-            ->assertSee('Add a product')
+            ->assertSee('Add product')
             ->assertSee('From a product URL')
             ->assertSee('Saving never starts generation.');
     }

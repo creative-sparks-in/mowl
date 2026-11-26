@@ -65,6 +65,32 @@ class BannerComposerTest extends TestCase
         $this->assertSame([40, 120, 200], $rgb(60, 200));
     }
 
+    public function test_an_app_screenshot_is_drawn_crisp_in_a_dark_window_in_the_product_slot(): void
+    {
+        $screen = imagecreatetruecolor(1280, 800);
+        imagefill($screen, 0, 0, imagecolorallocate($screen, 245, 245, 245));
+        ob_start();
+        imagepng($screen);
+        $screenshot = (string) ob_get_clean();
+        $creative = new BannerCreative(['layout' => 'split_left', 'headline' => 'Plan less', 'cta' => 'Start free trial']);
+        $brand = new Brand(['name' => 'Exact Brand', 'primary_color' => '#F4B942']);
+        $background = $this->image(1080, 1350, [60, 60, 60]);
+
+        $banner = imagecreatefromstring(app(BannerComposer::class)->compose($background, $brand, $creative, screenshot: $screenshot));
+        $plain = imagecreatefromstring(app(BannerComposer::class)->compose($background, $brand, $creative));
+
+        $slot = BannerComposer::productSlot('split_left');
+        $rgb = fn (\GdImage $image, int $x, int $y) => [(imagecolorat($image, $x, $y) >> 16) & 255, (imagecolorat($image, $x, $y) >> 8) & 255, imagecolorat($image, $x, $y) & 255];
+        // The screenshot keeps its own colour on a dark scene: no light matching, unlike a product cutout.
+        $this->assertSame([245, 245, 245], $rgb($banner, $slot['x'], $slot['base'] - 60));
+        // The window is the slot's width, fitted to the screenshot's 16:10 shape, with a dark top bar above it.
+        $top = $slot['base'] - (int) round(800 * ($slot['width'] - 24) / 1280) - 12 - 34;
+        $this->assertSame([24, 28, 36], $rgb($banner, $slot['x'], $top + 17));
+        $this->assertNotSame($rgb($plain, $slot['x'], $slot['base'] - 60), $rgb($banner, $slot['x'], $slot['base'] - 60));
+        // Everything outside the window is the same banner as without a screenshot.
+        $this->assertSame($rgb($plain, 60, 1300), $rgb($banner, 60, 1300));
+    }
+
     public function test_a_bright_studio_product_is_dimmed_toward_a_darker_scene_within_limits(): void
     {
         $product = imagecreatetruecolor(200, 120);

@@ -7,10 +7,10 @@
             <div class="pagehead">
                 <div>
                     <div class="eyebrow">{{ $workspace->name }}</div>
-                    <h1 class="display">Products</h1>
+                    <h1 class="display">{{ \App\Enums\OfferingType::plural($type) }}</h1>
                     <p class="muted">Everything starts with a product. Add one from its web page, confirm its facts, then create launch packs, pages and campaigns from it.</p>
                 </div>
-                @if($canCreate)<a class="pill pri" href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> Add product</a>@endif
+                @if($canCreate)<a class="pill pri" href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> {{ \App\Enums\OfferingType::addLabel($type) }}</a>@endif
             </div>
             @if($notice)<div class="banner ok small" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span class="grow">{{ $notice }}</span><button type="button" class="linkbtn" wire:click="$set('notice', null)">Dismiss</button></div>@endif
             @if($active->isNotEmpty() || $filtered || $archivedCount)
@@ -48,9 +48,9 @@
                 </div>
             @elseif($products->isEmpty() && ! $gettingStarted)
                 <div class="empty">
-                    <strong>{{ $brand ? 'No products for this brand yet' : 'Add your first product' }}</strong>
-                    <span class="small muted">Paste the product's web page and we read its name, price and details for you to confirm. Saving a product never starts generation or uses credits.</span>
-                    @if($canCreate)<a class="pill pri sm" href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> Add product</a>@endif
+                    <strong>{{ \App\Enums\OfferingType::emptyHeading($type) }}</strong>
+                    <span class="small muted">{{ \App\Enums\OfferingType::emptyLine($type) }}</span>
+                    @if($canCreate)<a class="pill pri sm" href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> {{ \App\Enums\OfferingType::addLabel($type) }}</a>@endif
                 </div>
             @elseif($products->isNotEmpty())
                 @php

@@ -9,6 +9,9 @@
             <div class="col pages-head-text">
                 <h2 class="pages-title">Landing pages</h2>
                 <span class="small muted">Build a page for {{ $product->name }} from a template, let the AI write it from the product's facts, then publish it to your store.</span>
+                @if($product->offeringType() !== \App\Enums\OfferingType::Physical)
+                    <span class="xs muted">{{ \App\Enums\OfferingType::PUBLISHING_NOTE }}</span>
+                @endif
             </div>
             <span class="sp"></span>
             @if($canEdit && $pages->isNotEmpty())

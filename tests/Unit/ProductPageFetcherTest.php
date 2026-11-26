@@ -32,6 +32,23 @@ HTML;
         $this->assertStringContainsString('Roomy and easy to carry.', $page['content']);
         $this->assertStringNotContainsString('ignore me', $page['content']);
         $this->assertSame(hash('sha256', $html), $page['content_hash']);
+        // Product markup is common on software pricing pages too, so it never guesses physical.
+        $this->assertNull($page['offering_type']);
+    }
+
+    public function test_it_guesses_software_or_a_service_from_the_structured_data(): void
+    {
+        $software = '<html><head><title>Ledger</title><script type="application/ld+json">{"@graph":[{"@type":"Organization","name":"Ledger"},{"@type":["SoftwareApplication","Product"],"name":"Ledger"}]}</script></head><body>Books in minutes.</body></html>';
+        $service = '<html><head><title>Fix-it</title><script type="application/ld+json">[{"@type":"ProfessionalService","name":"Fix-it"}]</script></head><body>We fix it.</body></html>';
+        Http::fake([
+            '93.184.216.34/app' => Http::response($software, 200, ['Content-Type' => 'text/html']),
+            '93.184.216.34/service' => Http::response($service, 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        $page = app(ProductPageFetcher::class)->fetch('https://93.184.216.34/app');
+        $this->assertSame('software', $page['offering_type']);
+        $this->assertSame(hash('sha256', $software), $page['content_hash']);
+        $this->assertSame('service', app(ProductPageFetcher::class)->fetch('https://93.184.216.34/service')['offering_type']);
     }
 
     public function test_woocommerce_gallery_photos_are_the_products_own_and_come_before_the_share_image(): void

@@ -53,7 +53,7 @@
                             </div>
                             <div class="row">
                                 <a class="pill ghost sm" href="{{ route('products.index', ['brand' => $brand->id]) }}" wire:navigate>View products</a>
-                                @if($canCreate)<a class="linkbtn" href="{{ route('products.create', ['brand' => $brand->id]) }}" wire:navigate>Add a product</a>@endif
+                                @if($canCreate)<a class="linkbtn" href="{{ route('products.create', ['brand' => $brand->id]) }}" wire:navigate>{{ \App\Enums\OfferingType::addLabel($brand->offeringType()) }}</a>@endif
                             </div>
                         </section>
                     @endforeach

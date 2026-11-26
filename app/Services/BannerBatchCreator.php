@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\OfferingType;
 use App\Models\BannerCreative;
 use App\Models\BannerGenerationBatch;
 use App\Models\CampaignPack;
@@ -134,7 +135,8 @@ class BannerBatchCreator
         if ($pack->status !== 'approved' || $pack->current_version < 1) {
             throw ValidationException::withMessages(['banner' => 'Approve the current campaign-pack version before generating banners.']);
         }
-        if (! $pack->product->mediaAssets()
+        // Software and service banners are drawn from the prompt alone, so they need no product photo.
+        if ($pack->product->offeringType() === OfferingType::Physical && ! $pack->product->mediaAssets()
             ->where('type', 'image')
             ->where('metadata->origin', 'product_page')
             ->exists()) {

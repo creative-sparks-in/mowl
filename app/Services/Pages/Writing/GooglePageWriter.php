@@ -101,6 +101,9 @@ class GooglePageWriter implements PageWriter
         if ($brief->team) {
             $parts[] = "TEAM KNOWLEDGE\n".$json($brief->team);
         }
+        if ($guidance = $brief->offeringType()->promptGuidance()) {
+            $parts[] = $guidance;
+        }
         if ($voice = $brief->brand['voice'] ?? null) {
             $parts[] = "BRAND VOICE (style only, never a source of facts)\n".(is_string($voice) ? $voice : $json($voice));
         }

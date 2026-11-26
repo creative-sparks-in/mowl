@@ -15,6 +15,12 @@ class ProductPageFetcher
 {
     private const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
+    /** Schema.org types that say what a page offers. Product is left out: SaaS pricing pages use it too. */
+    private const OFFERING_TYPES = [
+        'SoftwareApplication' => 'software', 'WebApplication' => 'software', 'MobileApplication' => 'software',
+        'Service' => 'service', 'ProfessionalService' => 'service',
+    ];
+
     private const SKIP_IMAGE_PATTERN = '/(logo|icon|sprite|pixel|tracking|favicon|placeholder|avatar|badge|flag|payment|stripe|paypal|visa|mastercard|amex|apple-?pay|google-?pay)/i';
 
     public function fetch(string $url): array
@@ -184,6 +190,7 @@ class ProductPageFetcher
 
         $xpath = new DOMXPath($document);
         $productData = $this->extractProductJsonLd($xpath);
+        $offeringType = $this->guessOfferingType($xpath);
         $title = $this->nodeText($xpath, '//title') ?: data_get($productData, 'name');
         $description = $this->metaContent($xpath, 'description')
             ?: $this->metaProperty($xpath, 'og:description')
@@ -210,6 +217,7 @@ class ProductPageFetcher
             // Only the product's own photos (structured data and the store's product gallery), never
             // the page's share image or related products, which can show another variant or props.
             'gallery_images' => $gallery,
+            'offering_type' => $offeringType,
             'product_truth' => array_filter([
                 'name' => data_get($productData, 'name') ?: $title,
                 'description' => data_get($productData, 'description') ?: $description,
@@ -346,6 +354,21 @@ class ProductPageFetcher
         }
 
         return [];
+    }
+
+    private function guessOfferingType(DOMXPath $xpath): ?string
+    {
+        foreach ($xpath->query('//script[@type="application/ld+json"]') as $node) {
+            foreach ($this->jsonLdCandidates(json_decode(trim($node->textContent), true)) as $candidate) {
+                foreach ((array) ($candidate['@type'] ?? []) as $type) {
+                    if (is_string($type) && isset(self::OFFERING_TYPES[$type])) {
+                        return self::OFFERING_TYPES[$type];
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private function jsonLdCandidates(mixed $decoded): array

@@ -2,9 +2,12 @@
 
 namespace App\Jobs;
 
+use App\Enums\OfferingType;
 use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
+use App\Models\MediaAsset;
+use App\Models\Product;
 use App\Services\BannerBatchStatus;
 use App\Services\BannerComposer;
 use App\Services\BannerGeneratorManager;
@@ -61,13 +64,15 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
         $creative->batch->update(['status' => 'running', 'started_at' => $creative->batch->started_at ?: now()]);
 
         try {
-            $images = $creative->campaignPack->product->mediaAssets()
+            $type = $creative->campaignPack->product->offeringType();
+            // Software and services have no product photo to cut out; their scene is drawn from the prompt alone.
+            $images = $type !== OfferingType::Physical ? collect() : $creative->campaignPack->product->mediaAssets()
                 ->where('type', 'image')
                 ->where('metadata->origin', 'product_page')
                 ->oldest()
                 ->limit((int) config('campaigns.banners.max_input_images'))
                 ->get();
-            if ($images->isEmpty()) {
+            if ($type === OfferingType::Physical && $images->isEmpty()) {
                 throw new \RuntimeException('No product image is available for banner generation.');
             }
 
@@ -80,7 +85,7 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
             $basePath = "campaign-banners/{$creative->batch->workspace_id}/{$creative->campaign_pack_id}/{$creative->id}";
             $backgroundPath = $basePath.'/background.'.($result->mimeType === 'image/webp' ? 'webp' : 'png');
             Storage::disk($creative->disk)->put($backgroundPath, $result->imageBytes);
-            $final = $composer->compose($result->imageBytes, $creative->campaignPack->product->brand, $creative, $result->productCutout, $result->productSpot);
+            $final = $composer->compose($result->imageBytes, $creative->campaignPack->product->brand, $creative, $result->productCutout, $result->productSpot, $type === OfferingType::Software ? $this->screenshot($creative->campaignPack->product) : null);
             $outputPath = $basePath.'/banner.png';
             Storage::disk($creative->disk)->put($outputPath, $final);
 
@@ -129,6 +134,16 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
         }
 
         $this->syncContent($creative);
+    }
+
+    /** A software product's oldest uploaded image (never one read from its page) is shown as its app screenshot. */
+    private function screenshot(Product $product): ?string
+    {
+        $asset = $product->mediaAssets()->where('type', 'image')->oldest()->get()
+            ->first(fn (MediaAsset $asset): bool => data_get($asset->metadata, 'origin') !== 'product_page' && $asset->status !== 'failed'
+                && Storage::disk($asset->disk)->exists($asset->path));
+
+        return $asset ? Storage::disk($asset->disk)->get($asset->path) : null;
     }
 
     /** Stores the last rejected background (never shown to clients) so a rejection can be checked by eye. */

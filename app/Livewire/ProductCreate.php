@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Enums\OfferingType;
 use App\Models\Brand;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
@@ -11,6 +12,7 @@ use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
 use App\Support\Membership;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -31,6 +33,15 @@ class ProductCreate extends Component
     public string $brandId = '';
 
     public string $newBrandName = '';
+
+    /** What the new brand sells. */
+    public string $newBrandType = 'physical';
+
+    /** The product's own type, or "" to follow its brand. */
+    public string $offeringType = '';
+
+    /** A key of OfferingType::PRICE_PERIODS, written into the price text on save. */
+    public string $pricePeriod = '';
 
     public string $productUrl = '';
 
@@ -123,6 +134,9 @@ class ProductCreate extends Component
         if ($this->brandId === 'new' && $pageBrand !== '' && in_array(trim($this->newBrandName), ['', trim((string) $this->currentWorkspace()->name)], true)) {
             $this->newBrandName = mb_substr($pageBrand, 0, 120);
         }
+        if ($this->brandId === 'new' && ($guess = OfferingType::tryFrom((string) ($page['offering_type'] ?? '')))) {
+            $this->newBrandType = $guess->value;
+        }
         $this->duplicateId = $this->findDuplicate([$this->productUrl, $page['url'] ?? null, $page['canonical_url'] ?? null])?->id;
     }
 
@@ -135,9 +149,16 @@ class ProductCreate extends Component
             'audience' => ['nullable', 'string', 'max:500'],
             'benefits' => ['nullable', 'string', 'max:1000'],
             'productUrl' => $this->mode === 'manual' ? ['nullable', 'url:http,https', 'max:2000'] : ['nullable'],
+            'offeringType' => ['nullable', Rule::enum(OfferingType::class)],
+            'pricePeriod' => ['nullable', Rule::in(array_keys(OfferingType::PRICE_PERIODS))],
         ], [
             'name.required' => 'Give the product a name so you can find it later.',
         ]);
+        $type = $this->offeringType($this->brandId === 'new' ? null : $this->scopedBrands()->find((int) $this->brandId));
+        $data['price'] = OfferingType::priceWithPeriod((string) $data['price'], $type->hasPricePeriods() ? $this->pricePeriod : '');
+        if (mb_strlen($data['price']) > 40) {
+            throw ValidationException::withMessages(['price' => 'The price field must not be greater than 40 characters.']);
+        }
 
         $page = null;
         if ($this->mode === 'url') {
@@ -159,13 +180,13 @@ class ProductCreate extends Component
         $brand = $this->resolveBrand();
         $workspace = $this->currentWorkspace();
 
-        [$product, $snapshot] = DB::transaction(function () use ($brand, $data, $page, $workspace): array {
+        [$product, $snapshot] = DB::transaction(function () use ($brand, $data, $page, $workspace, $type): array {
             $product = Product::create([
                 'brand_id' => $brand->id,
                 'name' => trim($data['name']),
                 'price' => filled($data['price']) ? trim($data['price']) : null,
                 'summary' => filled($data['description']) ? trim($data['description']) : null,
-            ]);
+            ] + (Brand::offeringTypeAvailable() ? ['offering_type' => $data['offeringType'] ?: null] : []));
             $snapshot = $page ? SourceSnapshot::create([
                 'product_id' => $product->id,
                 'url' => $page['url'],
@@ -179,7 +200,7 @@ class ProductCreate extends Component
             ]) : null;
             if (! $page && filled($data['productUrl'])) {
                 $product->resourceLinks()->create([
-                    'workspace_id' => $workspace->id, 'kind' => 'product_page', 'label' => 'Product page', 'url' => $data['productUrl'],
+                    'workspace_id' => $workspace->id, 'kind' => 'product_page', 'label' => $type->pageLabel(), 'url' => $data['productUrl'],
                 ]);
             }
 
@@ -226,6 +247,7 @@ class ProductCreate extends Component
         $workspace = $this->currentWorkspace();
         $brands = $this->scopedBrands()->orderBy('name')->get();
         $brand = $brands->firstWhere('id', (int) $this->brandId);
+        $type = $this->offeringType($brand);
 
         return view('livewire.product-create', [
             'workspace' => $workspace,
@@ -235,7 +257,9 @@ class ProductCreate extends Component
             'canCreateBrands' => (bool) $this->membership()?->canCreateBrands(),
             'duplicate' => $this->duplicateId ? Product::query()->whereKey($this->duplicateId)->whereIn('brand_id', $brands->pluck('id'))->with('brand')->first() : null,
             'profileAvailable' => Brand::profileAvailable(),
-        ])->layout('components.layouts.app')->title('Add product');
+            'offeringTypeAvailable' => Brand::offeringTypeAvailable(),
+            'type' => $type,
+        ])->layout('components.layouts.app')->title(OfferingType::addLabel($type));
     }
 
     private function resolveBrand(): Brand
@@ -250,16 +274,23 @@ class ProductCreate extends Component
             throw ValidationException::withMessages(['brandId' => 'Pick one of your brands.']);
         }
 
-        $data = $this->validate(['newBrandName' => ['required', 'string', 'max:120']], [
+        $data = $this->validate(['newBrandName' => ['required', 'string', 'max:120'], 'newBrandType' => ['required', Rule::enum(OfferingType::class)]], [
             'newBrandName.required' => 'Name the new brand, or pick an existing one.',
         ]);
         if ($workspace->brands()->count() >= config('campaigns.brand_limit')) {
             throw ValidationException::withMessages(['newBrandName' => 'This workspace has reached its brand limit. Pick an existing brand.']);
         }
-        $brand = $workspace->brands()->create(['name' => trim($data['newBrandName'])]);
+        $brand = $workspace->brands()->create(['name' => trim($data['newBrandName'])]
+            + (Brand::offeringTypeAvailable() ? ['offering_type' => $data['newBrandType']] : []));
         $this->brandId = (string) $brand->id;
 
         return $brand;
+    }
+
+    /** The product's own type, else its brand's, else the one picked for a new brand. */
+    private function offeringType(?Brand $brand): OfferingType
+    {
+        return OfferingType::tryFrom($this->offeringType) ?? $brand?->offeringType() ?? OfferingType::of($this->newBrandType);
     }
 
     /** People type "shop.example/product"; the fetcher needs a scheme. */

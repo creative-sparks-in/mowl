@@ -2,6 +2,7 @@
 
 namespace App\Services\Pages;
 
+use App\Enums\OfferingType;
 use App\Models\ContentItem;
 use App\Models\MediaAsset;
 use App\Models\Page;
@@ -90,6 +91,8 @@ class PageBuilder
         return StoreConnection::query()
             ->where('workspace_id', $product->brand->workspace_id)
             ->where(fn ($query) => $query->whereNull('brand_id')->orWhere('brand_id', $product->brand_id))
+            // WooCommerce publishing is for physical products; software and services keep the sandbox store.
+            ->when($product->offeringType() !== OfferingType::Physical, fn ($query) => $query->where('driver', 'sandbox'))
             ->orderByRaw('case when brand_id is null then 1 else 0 end')->orderBy('name')
             ->get();
     }
