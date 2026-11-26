@@ -299,7 +299,7 @@ class CreativeBrowser extends Component
 
         return match ($this->sort) {
             'oldest' => $query->orderBy('created_at')->orderBy('id'),
-            'name' => $query->orderBy('title')->orderBy('id'),
+            'name' => $query->orderByRaw($this->nameOrder($query, 'title'))->orderBy('id'),
             default => $query->orderByDesc('created_at')->orderByDesc('id'),
         };
     }
@@ -321,9 +321,18 @@ class CreativeBrowser extends Component
 
         return match ($this->sort) {
             'oldest' => $query->orderBy('created_at')->orderBy('id'),
-            'name' => $query->orderBy('headline')->orderBy('id'),
+            'name' => $query->orderByRaw($this->nameOrder($query, "coalesce(headline, '')"))->orderBy('id'),
             default => $query->orderByDesc('created_at')->orderByDesc('id'),
         };
+    }
+
+    /**
+     * Uploads and banners are limited separately, then merged, so both queries and the merge must agree on name order:
+     * ASCII-only lowercase compared byte by byte, as strtolower() and strcmp() do.
+     */
+    private function nameOrder(Builder $query, string $column): string
+    {
+        return $query->getConnection()->getDriverName() === 'pgsql' ? "lower({$column} collate \"C\")" : "lower({$column})";
     }
 
     /** Both kinds merged in grid order, up to the current limit. */
@@ -337,7 +346,7 @@ class CreativeBrowser extends Component
         }
         $items = match ($this->sort) {
             'oldest' => $items->sortBy('sort_time'),
-            'name' => $items->sortBy(fn ($item) => mb_strtolower($item['title'])),
+            'name' => $items->sort(fn ($a, $b) => strcmp($a['sort_name'], $b['sort_name']) ?: $a['id'] <=> $b['id']),
             default => $items->sortByDesc('sort_time'),
         };
 
@@ -357,7 +366,7 @@ class CreativeBrowser extends Component
                 'dimensions' => $item->width ? "{$item->width} x {$item->height}" : null,
                 'duration' => null, 'product' => $pack?->product?->name, 'productId' => $pack?->product_id,
                 'channel' => null, 'stage' => null, 'tags' => [], 'uploader' => null, 'archived' => false,
-                'created' => $item->created_at, 'sort_time' => $item->created_at?->getTimestamp(),
+                'created' => $item->created_at, 'sort_time' => $item->created_at?->getTimestamp(), 'sort_name' => strtolower($item->headline ?? ''),
                 'thumb' => route('campaign-banners.image', [$item->campaign_pack_id, $item]),
                 'file' => route('campaign-banners.image', [$item->campaign_pack_id, $item]),
                 'download' => route('campaign-banners.download', [$item->campaign_pack_id, $item]),
@@ -376,7 +385,7 @@ class CreativeBrowser extends Component
             'duration' => $item->durationLabel(), 'product' => $item->product?->name, 'productId' => $item->product_id,
             'channel' => CreativeAsset::CHANNELS[$item->channel] ?? null, 'stage' => CreativeAsset::STAGES[$item->stage] ?? null,
             'tags' => $item->tags ?? [], 'uploader' => $item->uploadedBy?->name, 'archived' => $item->archived_at !== null,
-            'created' => $item->created_at, 'sort_time' => $item->created_at?->getTimestamp(),
+            'created' => $item->created_at, 'sort_time' => $item->created_at?->getTimestamp(), 'sort_name' => strtolower($item->title),
             'thumb' => $item->poster_path ? route('creatives.file', [$item, 'poster']) : ($item->kind === 'image' ? route('creatives.file', [$item, 'file']) : null),
             'file' => route('creatives.file', [$item, 'file']),
             'download' => route('creatives.file', [$item, 'download']),

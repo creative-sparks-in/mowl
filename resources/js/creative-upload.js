@@ -85,8 +85,10 @@ function put(url, body, headers, onProgress, upload) {
     });
 }
 
+// Every request (each block, retry and the block list) checks for a cancel first, so a cancelled upload never commits a blob.
 async function retrying(task, upload, attempts = 3) {
     for (let attempt = 1; ; attempt++) {
+        if (upload.state === 'cancelled') throw new Error('cancelled');
         try {
             return await task();
         } catch (error) {
@@ -166,6 +168,7 @@ function creativeUploader($wire, chooseProduct) {
                 }
                 if (upload.state === 'cancelled') return;
                 await send(response.upload, upload.file, type, upload);
+                if (upload.state === 'cancelled') return;
                 const result = await $wire.finalizeUpload(upload.id);
                 if (!result.ok) throw new Error(result.error);
                 upload.progress = 1;

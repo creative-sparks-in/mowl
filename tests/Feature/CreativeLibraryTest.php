@@ -7,6 +7,7 @@ use App\Livewire\CreativeBrowser;
 use App\Models\BannerGenerationBatch;
 use App\Models\Brand;
 use App\Models\CampaignPack;
+use App\Models\ContentItem;
 use App\Models\CreativeAsset;
 use App\Models\Product;
 use App\Models\ProductHubShare;
@@ -142,6 +143,10 @@ class CreativeLibraryTest extends TestCase
         $browser->set('view', 'mine')->assertSee('Prospecting reel')->assertDontSee('Square static');
         $browser->set('view', 'archived')->assertSee('Old banner')->assertDontSee('Square static');
         $browser->set('view', 'all')->set('sort', 'name')->assertSeeInOrder(['Generated headline', 'Prospecting reel', 'Square static']);
+
+        $this->asset($product, ['title' => 'apple pie']);
+        $browser->set('limit', 2)->assertSeeInOrder(['apple pie', 'Generated headline'])->assertDontSee('Prospecting reel');
+        $browser->set('limit', 3)->assertSeeInOrder(['apple pie', 'Generated headline', 'Prospecting reel'])->assertDontSee('Square static');
     }
 
     public function test_edit_bulk_actions_and_delete_remove_storage_objects(): void
@@ -189,8 +194,11 @@ class CreativeLibraryTest extends TestCase
         Storage::disk('local')->put($asset->poster_path, 'jpeg');
         $share = ProductHubShare::create(['workspace_id' => $workspace->id, 'product_id' => $product->id, 'created_by_user_id' => $owner->id, 'token' => hash('sha256', 'creatives')]);
 
+        ContentItem::create(['workspace_id' => $workspace->id, 'product_id' => $product->id, 'type' => 'copy', 'title' => 'Email subject lines', 'status' => 'approved']);
+
         $this->get(route('product-hubs.share', $share->token))->assertOk()->assertSee('Creatives · 1')->assertSee('Client reel')
-            ->assertDontSee('Archived reel')->assertDontSee('Pending reel')->assertDontSee('Kettle reel');
+            ->assertDontSee('Archived reel')->assertDontSee('Pending reel')->assertDontSee('Kettle reel')
+            ->assertSee('Approved so far · 1')->assertSee('Email subject lines');
         $this->get(route('product-hubs.shared-library', [$share->token, $asset, 'download']))->assertOk()
             ->assertHeader('content-disposition', 'attachment; filename=client-reel.mp4');
         $this->get(route('product-hubs.shared-library', [$share->token, $asset, 'poster']))->assertOk()
