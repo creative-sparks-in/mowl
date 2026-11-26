@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 use Throwable;
 
@@ -176,6 +177,7 @@ class MediaProcessor
     private function processImage(MediaAsset $asset, string $sourcePath, string $temporaryDirectory): array
     {
         $output = $temporaryDirectory.'/image.jpg';
+        $width = 512;
         if ($this->ffmpegAvailable()) {
             $this->run([
                 config('campaigns.media.ffmpeg'), '-hide_banner', '-loglevel', 'error', '-i', $sourcePath,
@@ -184,9 +186,11 @@ class MediaProcessor
         } else {
             // Without ffmpeg (Vercel's PHP runtime) GD makes the same 512px-wide JPEG. A small compressed
             // file can decode to hundreds of MB, so its size is read from the header before it is decoded.
-            $size = @getimagesize($sourcePath);
-            $image = $size && $size[0] * $size[1] <= ProductImageImporter::MAX_PIXELS ? @imagecreatefromstring((string) file_get_contents($sourcePath)) : false;
-            $scaled = $image ? imagescale($image, 512) : false;
+            $size = @getimagesize($sourcePath) ?: [0, 0];
+            $image = $size[0] > 0 && $size[0] * $size[1] <= ProductImageImporter::MAX_PIXELS ? @imagecreatefromstring((string) file_get_contents($sourcePath)) : false;
+            // Never enlarged: a 10x2000 strip passes the pixel limit, and at 512 wide it would be 512x102400.
+            $width = min($width, $size[0]);
+            $scaled = $image ? imagescale($image, $width) : false;
             if (! $scaled) {
                 throw new RuntimeException('The image could not be decoded or is too large.');
             }
@@ -200,7 +204,7 @@ class MediaProcessor
                 'disk' => $asset->disk,
                 'path' => $path,
                 'content_hash' => hash_file('sha256', $output),
-                'width' => 512,
+                'width' => $width,
             ]]],
             'metadata' => [],
         ];
@@ -270,9 +274,17 @@ class MediaProcessor
         }
     }
 
+    /** Each tool is a full path, or a command name found on PATH the way Process resolves it. */
     private function ffmpegAvailable(): bool
     {
-        return is_executable((string) config('campaigns.media.ffmpeg')) && is_executable((string) config('campaigns.media.ffprobe'));
+        foreach (['ffmpeg', 'ffprobe'] as $tool) {
+            $command = (string) config("campaigns.media.{$tool}");
+            if (! is_executable($command) && (new ExecutableFinder)->find($command) === null) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function deduplicateFrames(array $frames): array

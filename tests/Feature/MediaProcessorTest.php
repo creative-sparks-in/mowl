@@ -101,11 +101,49 @@ class MediaProcessorTest extends TestCase
         Storage::fake('local');
         $this->withoutFfmpeg();
 
-        $processed = $this->processedImage();
+        $processed = $this->processedImage(1200, 800);
 
         $this->assertSame('processed', $processed->status);
         $derivative = Storage::disk('local')->path($processed->derivatives['images'][0]['path']);
         $this->assertSame([512, 341, IMAGETYPE_JPEG], array_slice(getimagesize($derivative), 0, 3));
+        $this->assertSame(512, $processed->derivatives['images'][0]['width']);
+    }
+
+    public function test_without_ffmpeg_a_narrow_image_is_never_enlarged(): void
+    {
+        Storage::fake('local');
+        $this->withoutFfmpeg();
+
+        // Enlarged to 512 wide this strip would be 512 x 102400, more than PHP's memory holds.
+        $processed = $this->processedImage(10, 2000);
+
+        $this->assertSame('processed', $processed->status);
+        $derivative = Storage::disk('local')->path($processed->derivatives['images'][0]['path']);
+        $this->assertSame([10, 2000, IMAGETYPE_JPEG], array_slice(getimagesize($derivative), 0, 3));
+        $this->assertSame(10, $processed->derivatives['images'][0]['width']);
+    }
+
+    public function test_ffmpeg_named_as_a_command_on_the_path_is_found(): void
+    {
+        Storage::fake('local');
+        config()->set('services.openai.api_key', null);
+        $asset = $this->videoAsset();
+        // The folder of the configured full path goes on PATH, so the bare names resolve wherever ffmpeg lives.
+        $path = (string) getenv('PATH');
+        putenv('PATH='.dirname((string) config('campaigns.media.ffmpeg')).PATH_SEPARATOR.$path);
+        config()->set('campaigns.media.ffmpeg', 'ffmpeg');
+        config()->set('campaigns.media.ffprobe', 'ffprobe');
+
+        try {
+            app(MediaProcessor::class)->process($asset);
+        } finally {
+            putenv('PATH='.$path);
+        }
+
+        $processed = $asset->fresh();
+        $this->assertSame('processed', $processed->status);
+        $this->assertArrayNotHasKey('analysis_mode', $processed->metadata);
+        $this->assertGreaterThan(0, count($processed->derivatives['frames']));
     }
 
     public function test_without_ffmpeg_an_image_too_large_to_decode_is_refused_before_decoding(): void
@@ -205,10 +243,10 @@ class MediaProcessorTest extends TestCase
         Storage::disk('gcs')->assertExists('originals/video.mp4');
     }
 
-    private function processedImage(): MediaAsset
+    private function processedImage(int $width = 120, int $height = 80): MediaAsset
     {
         [$workspace, $product] = $this->productFixture();
-        $image = imagecreatetruecolor(120, 80);
+        $image = imagecreatetruecolor($width, $height);
         $temporary = tempnam(sys_get_temp_dir(), 'mowl-image').'.png';
         imagepng($image, $temporary);
         imagedestroy($image);
