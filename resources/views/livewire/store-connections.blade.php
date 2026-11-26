@@ -30,7 +30,7 @@
             <div class="field full">
                 <label for="store-driver">Store type</label>
                 <select id="store-driver" class="input" wire:model.live="driver" @disabled($editingId)>
-                    <option value="woocommerce">WooCommerce (WordPress)</option>
+                    <option value="woocommerce">WordPress (with or without WooCommerce)</option>
                     <option value="sandbox">Sandbox store, for trying publishing</option>
                 </select>
             </div>

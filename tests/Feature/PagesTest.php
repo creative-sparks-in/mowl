@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OfferingType;
 use App\Livewire\PageEditor;
 use App\Livewire\ProductPages;
 use App\Livewire\StoreConnections;
@@ -37,7 +38,7 @@ class PagesTest extends TestCase
     use RefreshDatabase;
 
     /** A minimal WordPress with WooCommerce: pages and media in memory, served at their links. */
-    private array $wp = ['pages' => [], 'media' => 0, 'stale' => false, 'fail' => null, 'timeout' => false, 'filtered' => false, 'templates' => ['page-no-title'], 'link' => null, 'requests' => []];
+    private array $wp = ['pages' => [], 'media' => 0, 'stale' => false, 'fail' => null, 'timeout' => false, 'filtered' => false, 'templates' => ['page-no-title'], 'link' => null, 'woo' => true, 'requests' => []];
 
     public function test_a_new_page_is_filled_from_the_product_and_claims_its_sources_do_not_back_hold_publishing(): void
     {
@@ -150,6 +151,37 @@ class PagesTest extends TestCase
         $this->assertSame($page->document['sections'], $page->versions()->sole()->snapshot['document']['sections'], 'The version keeps the document as it was published.');
         Notification::assertSentTo($teammate, PageActivity::class, fn (PageActivity $notification) => $notification->event === 'published');
         Notification::assertNotSentTo([$scopedElsewhere, $client], PageActivity::class);
+    }
+
+    public function test_software_and_service_pages_publish_to_a_wordpress_site_without_woocommerce_through_wp_v2_only(): void
+    {
+        foreach (['software' => 'Start free trial', 'service' => 'Book a call'] as $type => $cta) {
+            $this->wp = ['woo' => false, 'pages' => [], 'requests' => []] + $this->wp;
+            [$owner, , $pack] = $this->fixture();
+            $pack->product->brand->update(['offering_type' => $type]);
+            $page = $this->approvedPage($owner, $pack->fresh());
+            $this->fakeWordPress();
+            $store = $this->connectStore($owner);
+            $this->assertFalse($store->has_woocommerce, 'A WordPress site without WooCommerce connects for pages.');
+            $this->assertSame('WordPress', $store->label());
+            $page->update(['store_connection_id' => $store->id]);
+
+            $this->editor($owner, $page->fresh())
+                ->call('openDrawer')
+                ->assertSee(OfferingType::PUBLISHING_NOTE)
+                ->call('publish', $page->fresh()->document_revision)
+                ->assertHasNoErrors()
+                ->assertSee('v1 is live');
+
+            $this->assertSame('live', $page->fresh()->publish_state);
+            $urls = collect($this->wp['requests'])->map(fn (Request $request) => $request->url());
+            $this->assertTrue($urls->contains('https://shop.test/wp-json/wp/v2/pages'));
+            $this->assertFalse($urls->contains(fn (string $url) => str_contains($url, 'wc/v3')), "A {$type} page never calls WooCommerce.");
+            $this->assertEmpty($urls->filter(fn (string $url) => str_contains($url, '/wp-json/') && ! preg_match('#/wp-json/(wp/v2/|$)#', $url))->all());
+            $sent = collect($this->wp['requests'])->first(fn (Request $request) => $request->method() === 'POST' && str_ends_with($request->url(), '/wp-json/wp/v2/pages'));
+            $this->assertStringContainsString($cta, $sent['content']);
+            $this->assertStringContainsString('href="https://example.com/pages"', $sent['content'], 'Buttons link to the product page.');
+        }
     }
 
     public function test_a_store_that_strips_layout_styles_is_reported(): void
@@ -704,7 +736,7 @@ class PagesTest extends TestCase
                 return Http::response(['code' => 'rest_not_logged_in'], 401);
             }
             if ($url === 'https://shop.test/wp-json/') {
-                return Http::response(['name' => 'Shop', 'namespaces' => ['oembed/1.0', 'wp/v2', 'wc/v3'], 'authentication' => [
+                return Http::response(['name' => 'Shop', 'namespaces' => ['oembed/1.0', 'wp/v2', ...($this->wp['woo'] ? ['wc/v3'] : [])], 'authentication' => [
                     'application-passwords' => ['endpoints' => ['authorization' => 'https://shop.test/wp-admin/authorize-application.php']],
                 ]]);
             }

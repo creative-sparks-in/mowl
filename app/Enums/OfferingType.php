@@ -18,7 +18,9 @@ enum OfferingType: string
 
     public const PRODUCT_LABEL = 'Type';
 
-    public const PUBLISHING_NOTE = 'Publishing to Shopify or WooCommerce is available for physical products only.';
+    public const PUBLISHING_NOTE = 'Pages publish to your WordPress site as regular pages. WooCommerce product links and order tracking are for physical products only.';
+
+    public const ORDERS_NOTE = 'Pulling WooCommerce orders is for physical products only. Import a CSV from your analytics or billing tool instead.';
 
     /** Price periods offered for software and services. The key is stored nowhere: it is written into the price text. */
     public const PRICE_PERIODS = ['' => 'One-off', 'month' => 'Per month', 'year' => 'Per year', 'project' => 'From, per project'];
