@@ -10,7 +10,7 @@
     $checkedAt = $source?->fetched_at ?? $source?->created_at;
 @endphp
 @if(! $knowledgeReady)
-    <div class="banner warn" role="status"><i class="ti ti-database-exclamation" aria-hidden="true"></i><span>Knowledge turns on once the latest database migration has run. Launch packs keep using the product page as before.</span></div>
+    <div class="banner warn" role="status"><i class="ti ti-database-exclamation" aria-hidden="true"></i><span>Knowledge turns on once the latest database migration has run. Launch packs keep using the {{ mb_strtolower($product->offeringType()->pageLabel()) }} as before.</span></div>
 @else
     @if($conflicts->isNotEmpty())
         <div class="banner warn" role="status"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span><strong>The source changed.</strong> Review each change. Confirmed facts and past approved outputs are never overwritten silently.</span></div>

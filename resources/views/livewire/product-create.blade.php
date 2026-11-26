@@ -13,8 +13,8 @@
 
             <header class="pagehead">
                 <div>
-                    <div class="eyebrow">Add product</div>
-                    <h1 class="display">Add a product</h1>
+                    <div class="eyebrow">{{ \App\Enums\OfferingType::addLabel($type) }}</div>
+                    <h1 class="display">{{ \App\Enums\OfferingType::addLabel($type) }}</h1>
                     <p class="muted">Paste your product's page address. We read its name, price and details, you check them, then save. Saving is free and generates nothing.</p>
                 </div>
             </header>
@@ -29,7 +29,7 @@
                     <section class="card col">
                         @if($mode === 'url')
                             <div class="field">
-                                <label for="add-url">Product page address</label>
+                                <label for="add-url">{{ $type->importHint() }}</label>
                                 <div class="row add-url-row">
                                     <input id="add-url" class="input" type="text" inputmode="url" autocomplete="url" wire:model.blur="productUrl" wire:keydown.enter.prevent="import" placeholder="shop.example/product-name" aria-describedby="add-url-help" @error('productUrl') aria-invalid="true" @enderror>
                                     <button type="button" class="pill dark" wire:click="import" wire:loading.attr="disabled" wire:target="import">
@@ -51,7 +51,10 @@
                                 </div>
                                 <div class="field c6">
                                     <label for="m-price">Price</label>
-                                    <input id="m-price" class="input" type="text" wire:model="price" maxlength="40" placeholder="$0.00">
+                                    <div class="row add-url-row">
+                                        <input id="m-price" class="input" type="text" wire:model="price" maxlength="40" placeholder="{{ $type->priceHint() }}">
+                                        @if($type->hasPricePeriods())<label class="sr-only" for="m-period">Price period</label><select id="m-period" class="input" wire:model="pricePeriod">@foreach(\App\Enums\OfferingType::PRICE_PERIODS as $key => $label)<option value="{{ $key }}">{{ $label }}</option>@endforeach</select>@endif
+                                    </div>
                                     @error('price')<span class="err" role="alert">{{ $message }}</span>@enderror
                                 </div>
                                 <div class="field c6">
@@ -59,7 +62,7 @@
                                     <input id="m-aud" class="input" type="text" wire:model="audience" maxlength="500" placeholder="{{ $brand?->default_audience ? 'Brand default: '.$brand->default_audience : 'Who buys this?' }}">
                                 </div>
                                 <div class="field c6">
-                                    <label for="m-url">Product page address <span class="muted">(optional)</span></label>
+                                    <label for="m-url">{{ $type->pageLabel() }} address <span class="muted">(optional)</span></label>
                                     <input id="m-url" class="input" type="url" wire:model="productUrl" placeholder="https://shop.example/product-name">
                                     @error('productUrl')<span class="err" role="alert">{{ $message }}</span>@enderror
                                 </div>
@@ -90,6 +93,29 @@
                                     <label for="add-brand-name">New brand name</label>
                                     <input id="add-brand-name" class="input" type="text" wire:model="newBrandName" maxlength="120" @error('newBrandName') aria-invalid="true" @enderror>
                                     @error('newBrandName')<span class="err" role="alert">{{ $message }}</span>@enderror
+                                </div>
+                                @if($offeringTypeAvailable)
+                                    <div class="field c6">
+                                        <label for="add-brand-type">{{ \App\Enums\OfferingType::BRAND_QUESTION }}</label>
+                                        <select id="add-brand-type" class="input" wire:model.live="newBrandType">
+                                            @foreach(\App\Enums\OfferingType::cases() as $option)
+                                                <option value="{{ $option->value }}">{{ $option->brandOption() }}</option>
+                                            @endforeach
+                                        </select>
+                                        @error('newBrandType')<span class="err" role="alert">{{ $message }}</span>@enderror
+                                    </div>
+                                @endif
+                            @endif
+                            @if($offeringTypeAvailable)
+                                <div class="field c6">
+                                    <label for="add-type">{{ \App\Enums\OfferingType::PRODUCT_LABEL }}</label>
+                                    <select id="add-type" class="input" wire:model.live="offeringType">
+                                        <option value="">{{ ($brand?->offeringType() ?? \App\Enums\OfferingType::of($newBrandType))->sameAsBrand() }}</option>
+                                        @foreach(\App\Enums\OfferingType::cases() as $option)
+                                            <option value="{{ $option->value }}">{{ $option->productOption() }}</option>
+                                        @endforeach
+                                    </select>
+                                    @error('offeringType')<span class="err" role="alert">{{ $message }}</span>@enderror
                                 </div>
                             @endif
                         </div>
@@ -130,7 +156,7 @@
                                         <tr>
                                             <th scope="row" class="fact-name">Price</th>
                                             <td class="fact-source">{!! isset($source['price']) ? e($source['price']) : '<span class="muted">Not found</span>' !!}</td>
-                                            <td class="fact-value"><label class="sr-only" for="af-price">Confirmed price</label><input id="af-price" class="input" type="text" wire:model.blur="price" maxlength="40" placeholder="Enter the price you sell at"></td>
+                                            <td class="fact-value"><label class="sr-only" for="af-price">Confirmed price</label><div class="row add-url-row"><input id="af-price" class="input" type="text" wire:model.blur="price" maxlength="40" placeholder="{{ $type->priceHint() }}">@if($type->hasPricePeriods())<label class="sr-only" for="af-period">Price period</label><select id="af-period" class="input" wire:model="pricePeriod">@foreach(\App\Enums\OfferingType::PRICE_PERIODS as $key => $label)<option value="{{ $key }}">{{ $label }}</option>@endforeach</select>@endif</div>@error('price')<span class="err" role="alert">{{ $message }}</span>@enderror</td>
                                             <td>{!! filled($price) ? $statusTag('ok', 'Confirmed') : $statusTag('', 'Missing') !!}</td>
                                         </tr>
                                         <tr>

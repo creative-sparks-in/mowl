@@ -34,6 +34,18 @@
                                 @error('website')<span class="err" role="alert">{{ $message }}</span>@enderror
                             </div>
                         </div>
+                        @if($offeringTypeAvailable)
+                            <fieldset class="settings-kind" aria-describedby="b-type-help">
+                                <legend class="field-label">{{ \App\Enums\OfferingType::BRAND_QUESTION }}</legend>
+                                <span id="b-type-help" class="muted xs">{{ \App\Enums\OfferingType::BRAND_HELPER }}</span>
+                                <div class="opt-grid">
+                                    @foreach(\App\Enums\OfferingType::cases() as $type)
+                                        <label class="opt"><input type="radio" name="offering_type" value="{{ $type->value }}" wire:model="offeringType"><span><strong class="medium">{{ $type->brandOption() }}</strong><br><span class="muted">{{ $type->brandHint() }}</span></span></label>
+                                    @endforeach
+                                </div>
+                                @error('offeringType')<span class="err" role="alert">{{ $message }}</span>@enderror
+                            </fieldset>
+                        @endif
                     </section>
 
                     <section class="card col">

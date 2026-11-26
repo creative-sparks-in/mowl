@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Enums\OfferingType;
 use App\Models\Product;
 use App\Services\ContentLibrary;
 use App\Services\ProductKnowledge;
@@ -113,16 +114,22 @@ class ProductIndex extends Component
         $filtered = $search !== '' || $show !== 'active';
         $view = $this->view === 'grid' ? 'grid' : 'list';
 
-        $brands = $membership->scopeBrands($workspace->brands()->getQuery(), 'id')->orderBy('name')->get(['id', 'name']);
+        $brands = $membership->scopeBrands($workspace->brands()->getQuery(), 'id')->orderBy('name')->get();
         $canCreate = $membership->canCreate();
+        // A store with no brand yet is about to add one named after itself, and it starts out physical.
+        $type = match (true) {
+            (bool) $this->brand => $brands->firstWhere('id', $this->brand)?->offeringType(),
+            $brands->isEmpty() => $workspace->isAgency() ? null : OfferingType::Physical,
+            default => OfferingType::shared($brands->map->offeringType()),
+        };
 
-        $gettingStarted = $filtered ? null : $this->gettingStarted($active, $canCreate, $workspace->isAgency());
+        $gettingStarted = $filtered ? null : $this->gettingStarted($active, $canCreate, $workspace->isAgency(), $type);
 
         return view('livewire.product-index', compact(
             'workspace', 'products', 'brands', 'canCreate', 'gettingStarted', 'archiveAvailable', 'show', 'view',
-            'archivedCount', 'attentionCount', 'filtered', 'active'
+            'archivedCount', 'attentionCount', 'filtered', 'active', 'type'
         ))
-            ->layout('components.layouts.app')->title('Products');
+            ->layout('components.layouts.app')->title(OfferingType::plural($type));
     }
 
     /** Something on the product is waiting for the team: changed facts, failed or unreviewed work, or a stale source. */
@@ -147,7 +154,7 @@ class ProductIndex extends Component
      * The path from an empty workspace to a first shared launch pack. Shown until someone has
      * done it once, then never again. Null when there is nothing left to guide.
      */
-    private function gettingStarted($products, bool $canCreate, bool $agency): ?array
+    private function gettingStarted($products, bool $canCreate, bool $agency, ?OfferingType $type): ?array
     {
         if ($this->brand) {
             return null;
@@ -160,7 +167,7 @@ class ProductIndex extends Component
 
         $steps = [
             ['title' => 'Add a product', 'hint' => 'Paste its page address and we read the name, price and details for you to check.', 'done' => (bool) $first,
-                'label' => $canCreate ? 'Add product' : null, 'url' => route('products.create')],
+                'label' => $canCreate ? OfferingType::addLabel($type) : null, 'url' => route('products.create')],
             ['title' => 'Write a launch pack', 'hint' => 'Positioning, ad angles, three video scripts and channel copy, written only from the product\'s facts. 1 credit, about two minutes.', 'done' => (bool) $withPack,
                 'label' => $canCreate && $first ? 'Create launch pack' : null, 'url' => $first ? route('campaign-packs.create', ['product' => $first->id]) : null],
             ['title' => 'Check and approve it', 'hint' => 'Approve the product facts, then each output. Approving never publishes anything.', 'done' => (bool) $approved,

@@ -59,6 +59,22 @@
                     @if($item?->status === 'conflict')<span class="tag warn"><span class="dot"></span>Source changed</span>@endif
                 </div>
             @endforeach
+            @if($offeringTypeAvailable)
+                <div>
+                    @if($canManage)
+                        <label class="muted small" for="product-type">{{ \App\Enums\OfferingType::PRODUCT_LABEL }}</label>
+                        <select id="product-type" class="input" wire:model="offeringType" wire:change="saveOfferingType">
+                            <option value="">{{ $product->brand->offeringType()->sameAsBrand() }}</option>
+                            @foreach(\App\Enums\OfferingType::cases() as $option)
+                                <option value="{{ $option->value }}">{{ $option->productOption() }}</option>
+                            @endforeach
+                        </select>
+                        @error('offeringType')<span class="err" role="alert">{{ $message }}</span>@enderror
+                    @else
+                        <span class="muted small">{{ \App\Enums\OfferingType::PRODUCT_LABEL }}</span><strong>{{ $product->offeringType()->productOption() }}</strong>
+                    @endif
+                </div>
+            @endif
         </div>
     </section>
 

@@ -3,8 +3,10 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Enums\OfferingType;
 use App\Models\Brand;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -31,6 +33,8 @@ class BrandEditor extends Component
     public string $voice = '';
 
     public string $defaultAudience = '';
+
+    public string $offeringType = 'physical';
 
     /**
      * Palette colours keyed by a stable id ("c1", "c2", ...), in display order. Rows bind to
@@ -66,6 +70,7 @@ class BrandEditor extends Component
         $this->website = (string) $brand->website;
         $this->voice = (string) ($brand->voice ?? '');
         $this->defaultAudience = (string) ($brand->default_audience ?? '');
+        $this->offeringType = $brand->offeringType()->value;
         $this->setPalette(array_map('strtoupper', $brand->colors()));
     }
 
@@ -113,6 +118,7 @@ class BrandEditor extends Component
             'website' => ['nullable', 'url:http,https', 'max:255'],
             'voice' => ['nullable', 'string', 'max:1000'],
             'defaultAudience' => ['nullable', 'string', 'max:500'],
+            'offeringType' => ['required', Rule::enum(OfferingType::class)],
             'colors' => ['array', 'max:'.self::MAX_COLORS],
             'colors.*' => ['required', 'string', 'regex:/^#[0-9A-F]{6}$/'],
             'logo' => ['nullable', 'file', 'mimetypes:image/png,image/webp', 'max:5120'],
@@ -137,6 +143,9 @@ class BrandEditor extends Component
                 // An empty list (not null) records that the palette was cleared on purpose.
                 'palette' => $palette,
             ];
+        }
+        if (Brand::offeringTypeAvailable()) {
+            $attributes['offering_type'] = $data['offeringType'];
         }
 
         $brand = DB::transaction(function () use ($workspace, $attributes): Brand {
@@ -200,6 +209,7 @@ class BrandEditor extends Component
             'workspace' => $workspace,
             'brand' => $brand,
             'profileAvailable' => Brand::profileAvailable(),
+            'offeringTypeAvailable' => Brand::offeringTypeAvailable(),
             'validPalette' => array_values(array_filter($this->palette(), fn ($color) => preg_match('/^#[0-9A-F]{6}$/', $color))),
         ])->layout('components.layouts.app')->title('Brand');
     }

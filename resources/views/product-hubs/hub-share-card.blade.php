@@ -55,7 +55,7 @@
         <details class="hub-edit" @if($errors->has('resourceInputs.*') || session('resource-status')) open @endif>
             <summary class="pill ghost sm">Files and folders · {{ $product->resourceLinks->count() }}</summary>
             <form wire:submit="saveResources" class="col hub-form">
-                <p class="muted small">Links to your own files: brand guide, Drive folders, the product page. They show as buttons at the top of the shared page.</p>
+                <p class="muted small">Links to your own files: brand guide, Drive folders, the {{ mb_strtolower($product->offeringType()->pageLabel()) }}. They show as buttons at the top of the shared page.</p>
                 @if(session('resource-status'))<div class="banner ok" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span>{{ session('resource-status') }}</span></div>@endif
                 <div class="hub-form-grid">
                     @foreach($resourceLabels as $kind => $label)
