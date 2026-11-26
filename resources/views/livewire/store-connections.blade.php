@@ -22,7 +22,7 @@
             @endif
         </div>
     @empty
-        @unless($formOpen)<div class="empty"><strong>No stores connected</strong><span class="small muted">Connect a WooCommerce store to publish landing pages, or add the sandbox store to try publishing first.</span></div>@endunless
+        @unless($formOpen)<div class="empty"><strong>No stores connected</strong><span class="small muted">Connect your WordPress site to publish landing pages, or add the sandbox store to try publishing first.</span></div>@endunless
     @endforelse
 
     @if($formOpen)
