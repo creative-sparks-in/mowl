@@ -26,7 +26,6 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -34,6 +33,7 @@ use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url as QueryParameter;
 use Livewire\Component;
 use Livewire\WithFileUploads;
+use Throwable;
 
 class CampaignWorkspace extends Component
 {
@@ -431,21 +431,12 @@ class CampaignWorkspace extends Component
         $attributes = ['primary_color' => $data['bannerPrimaryColor'] ?: null];
 
         if ($this->bannerLogo) {
-            $disk = config('campaigns.banners.disk');
-            $extension = strtolower($this->bannerLogo->extension() ?: 'png');
-            $path = $this->bannerLogo->storeAs(
-                "brand-assets/{$this->currentWorkspace()->id}/{$brand->id}",
-                'banner-logo.'.$extension,
-                $disk,
-            );
-            if ($brand->banner_logo_path && ($brand->banner_logo_path !== $path || $brand->banner_logo_disk !== $disk)) {
-                Storage::disk($brand->banner_logo_disk)->delete($brand->banner_logo_path);
+            try {
+                $brand->storeBannerLogo($this->bannerLogo);
+            } catch (Throwable $exception) {
+                report($exception);
+                throw ValidationException::withMessages(['bannerLogo' => 'The logo could not be saved. Please try again.']);
             }
-            $attributes += [
-                'banner_logo_disk' => $disk,
-                'banner_logo_path' => $path,
-                'banner_logo_mime_type' => $this->bannerLogo->getMimeType(),
-            ];
         }
 
         $brand->update($attributes);

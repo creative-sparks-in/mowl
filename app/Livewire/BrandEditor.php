@@ -4,11 +4,12 @@ namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
 use App\Models\Brand;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
 use Livewire\WithFileUploads;
+use Throwable;
 
 /**
  * Create or edit a brand: the voice, default audience and palette every product of the brand inherits.
@@ -138,33 +139,37 @@ class BrandEditor extends Component
             ];
         }
 
-        if ($this->brandId) {
-            $brand = $workspace->brands()->findOrFail($this->brandId);
-            $brand->update($attributes);
-            $event = 'brand_updated';
-        } else {
-            if ($workspace->brands()->count() >= config('campaigns.brand_limit')) {
-                throw ValidationException::withMessages(['name' => 'This workspace has reached its brand limit.']);
+        $brand = DB::transaction(function () use ($workspace, $attributes): Brand {
+            if ($this->brandId) {
+                $brand = $workspace->brands()->findOrFail($this->brandId);
+                $brand->update($attributes);
+                $event = 'brand_updated';
+            } else {
+                if ($workspace->brands()->count() >= config('campaigns.brand_limit')) {
+                    throw ValidationException::withMessages(['name' => 'This workspace has reached its brand limit.']);
+                }
+                $brand = $workspace->brands()->create($attributes);
+                $event = 'brand_created';
             }
-            $brand = $workspace->brands()->create($attributes);
-            $event = 'brand_created';
-        }
 
-        if ($this->logo) {
-            $disk = config('campaigns.banners.disk');
-            $extension = strtolower($this->logo->extension() ?: 'png');
-            $path = $this->logo->storeAs("brand-assets/{$workspace->id}/{$brand->id}", 'banner-logo.'.$extension, $disk);
-            if ($brand->banner_logo_path && ($brand->banner_logo_path !== $path || $brand->banner_logo_disk !== $disk)) {
-                Storage::disk($brand->banner_logo_disk)->delete($brand->banner_logo_path);
+            $workspace->auditEvents()->create([
+                'actor_user_id' => auth()->id(), 'event' => $event, 'subject_type' => Brand::class, 'subject_id' => $brand->id,
+                'metadata' => ['fields' => array_keys($attributes), 'has_logo' => $this->logo !== null || (bool) $brand->banner_logo_path],
+            ]);
+
+            // Last, so a failed logo rolls back the brand and nothing after it can orphan the stored file.
+            if ($this->logo) {
+                try {
+                    $brand->storeBannerLogo($this->logo);
+                } catch (Throwable $exception) {
+                    report($exception);
+                    throw ValidationException::withMessages(['logo' => 'The logo could not be saved. Please try again.']);
+                }
             }
-            $brand->update(['banner_logo_disk' => $disk, 'banner_logo_path' => $path, 'banner_logo_mime_type' => $this->logo->getMimeType()]);
-            $this->logo = null;
-        }
 
-        $workspace->auditEvents()->create([
-            'actor_user_id' => auth()->id(), 'event' => $event, 'subject_type' => Brand::class, 'subject_id' => $brand->id,
-            'metadata' => ['fields' => array_keys($attributes), 'has_logo' => (bool) $brand->banner_logo_path],
-        ]);
+            return $brand;
+        });
+        $this->logo = null;
 
         session()->flash('status', "{$brand->name} saved. Its products use the new voice, audience and palette from the next launch pack.");
 

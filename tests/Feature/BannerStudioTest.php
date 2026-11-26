@@ -178,26 +178,59 @@ class BannerStudioTest extends TestCase
 
     public function test_branding_is_saved_and_the_studio_uses_the_automatic_product_reference(): void
     {
-        [$user, $workspace, $pack] = $this->fixture();
+        [$user, , $pack] = $this->fixture();
 
         Livewire::actingAs($user)->test(CampaignWorkspace::class, ['pack' => $pack])
             ->assertSee('Captured from product page')
             ->assertDontSee('Upload images')
             ->assertDontSee('Product images');
 
-        $this->actingAs($user);
-        session(['current_workspace_id' => $workspace->id]);
-        $component = app(CampaignWorkspace::class);
-        $component->packId = $pack->id;
-        $component->bannerPrimaryColor = '#123456';
-        $component->bannerLogo = UploadedFile::fake()->image('logo.png', 180, 60);
-        $component->saveBannerBranding();
+        Livewire::actingAs($user)->test(CampaignWorkspace::class, ['pack' => $pack])
+            ->set('bannerPrimaryColor', '#123456')
+            ->set('bannerLogo', UploadedFile::fake()->image('logo.png', 180, 60))
+            ->call('saveBannerBranding')
+            ->assertHasNoErrors();
 
         $brand = $pack->product->brand->fresh();
         $this->assertSame('#123456', $brand->primary_color);
         $this->assertNotNull($brand->banner_logo_path);
         $this->assertSame(1, $pack->product->mediaAssets()->where('type', 'image')->count());
         Storage::disk('local')->assertExists($brand->banner_logo_path);
+    }
+
+    public function test_a_banner_logo_is_saved_when_uploads_and_banners_share_a_cloud_disk(): void
+    {
+        [$user, , $pack] = $this->fixture();
+        // Production keeps Livewire uploads and banners on one cloud disk that throws on a failed read.
+        Storage::fake('tmp-for-tests', ['throw' => true]);
+        config(['livewire.temporary_file_upload.disk' => 'tmp-for-tests', 'campaigns.banners.disk' => 'tmp-for-tests']);
+
+        $component = Livewire::actingAs($user)->test(CampaignWorkspace::class, ['pack' => $pack])
+            ->set('bannerLogo', UploadedFile::fake()->image('logo.png', 180, 60));
+        // Outside unit tests Livewire reads an upload's mime type from the disk instead of its test metadata.
+        $this->app['env'] = 'production';
+        $component->call('saveBannerBranding')->assertHasNoErrors();
+        $this->app['env'] = 'testing';
+
+        $brand = $pack->product->brand->fresh();
+        $this->assertSame('image/png', $brand->banner_logo_mime_type);
+        Storage::disk('tmp-for-tests')->assertExists($brand->banner_logo_path);
+    }
+
+    public function test_a_banner_logo_that_cannot_be_stored_shows_an_error_and_changes_nothing(): void
+    {
+        [$user, , $pack] = $this->fixture();
+        config(['filesystems.disks.unconfigured' => ['driver' => 'gcs'], 'campaigns.banners.disk' => 'unconfigured']);
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class, ['pack' => $pack])
+            ->set('bannerPrimaryColor', '#123456')
+            ->set('bannerLogo', UploadedFile::fake()->image('logo.png', 180, 60))
+            ->call('saveBannerBranding')
+            ->assertHasErrors('bannerLogo');
+
+        $brand = $pack->product->brand->fresh();
+        $this->assertNull($brand->primary_color);
+        $this->assertNull($brand->banner_logo_path);
     }
 
     public function test_a_missing_website_image_is_explained_without_offering_an_upload(): void

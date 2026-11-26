@@ -165,6 +165,43 @@ class BrandEditorTest extends TestCase
         Storage::disk('local')->assertExists($brand->banner_logo_path);
     }
 
+    public function test_a_new_brand_logo_is_saved_when_uploads_and_banners_share_a_cloud_disk(): void
+    {
+        // Production keeps Livewire uploads and banners on one cloud disk that throws on a failed read.
+        Storage::fake('tmp-for-tests', ['throw' => true]);
+        config(['livewire.temporary_file_upload.disk' => 'tmp-for-tests', 'campaigns.banners.disk' => 'tmp-for-tests']);
+        [$user, $workspace] = $this->workspaceUser();
+
+        $component = Livewire::actingAs($user)->test(BrandEditor::class)
+            ->set('name', 'Captura')
+            ->set('logo', UploadedFile::fake()->image('logo.png', 200, 200));
+        // Outside unit tests Livewire reads an upload's mime type from the disk instead of its test metadata.
+        $this->app['env'] = 'production';
+        $component->call('save')->assertHasNoErrors();
+        $this->app['env'] = 'testing';
+
+        $brand = $workspace->brands()->sole();
+        $this->assertSame('image/png', $brand->banner_logo_mime_type);
+        Storage::disk('tmp-for-tests')->assertExists($brand->banner_logo_path);
+        $this->assertSame(1, $workspace->auditEvents()->where('event', 'brand_created')->count());
+    }
+
+    public function test_a_logo_that_cannot_be_stored_shows_an_error_and_leaves_no_brand(): void
+    {
+        config(['filesystems.disks.unconfigured' => ['driver' => 'gcs'], 'campaigns.banners.disk' => 'unconfigured']);
+        [$user, $workspace] = $this->workspaceUser();
+
+        Livewire::actingAs($user)->test(BrandEditor::class)
+            ->set('name', 'Captura')
+            ->set('logo', UploadedFile::fake()->image('logo.png', 200, 200))
+            ->call('save')
+            ->assertHasErrors('logo')
+            ->assertNoRedirect();
+
+        $this->assertSame(0, $workspace->brands()->count());
+        $this->assertSame(0, $workspace->auditEvents()->count());
+    }
+
     public function test_brands_of_another_workspace_cannot_be_edited(): void
     {
         [$user] = $this->workspaceUser();
