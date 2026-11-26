@@ -70,6 +70,15 @@ class CreativeLibraryTest extends TestCase
         $asset->refresh();
         $this->assertSame('ready', $asset->status);
         $this->assertNull($asset->poster_path, 'A poster that never arrived is dropped.');
+
+        $browser->call('requestUpload', $this->file(['size' => 10, 'poster' => true]));
+        $oversized = CreativeAsset::latest('id')->firstOrFail();
+        Storage::disk('local')->put($oversized->path, str_repeat('a', 10));
+        Storage::disk('local')->put($oversized->poster_path, str_repeat('a', 3 * 1024 * 1024));
+        $poster = $oversized->poster_path;
+        $browser->call('finalizeUpload', $oversized->id)->assertReturned(['ok' => true]);
+        $this->assertNull($oversized->refresh()->poster_path, 'A poster too large to be a thumbnail is dropped.');
+        Storage::disk('local')->assertMissing($poster);
     }
 
     public function test_reviewers_view_but_cannot_upload_and_other_workspaces_are_isolated(): void

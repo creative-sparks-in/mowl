@@ -117,7 +117,9 @@ class CreativeLibrary
         if (! $disk->exists($asset->path) || $disk->size($asset->path) !== $asset->size_bytes) {
             return false;
         }
-        if ($asset->poster_path && ! $disk->exists($asset->poster_path)) {
+        // Posters are 640 px JPEGs made in the browser; anything larger is not one.
+        if ($asset->poster_path && (! $disk->exists($asset->poster_path) || $disk->size($asset->poster_path) > 2 * 1024 * 1024)) {
+            $disk->delete($asset->poster_path);
             $asset->poster_path = null;
         }
         $asset->status = 'ready';
