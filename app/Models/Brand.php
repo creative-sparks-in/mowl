@@ -6,6 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use RuntimeException;
+use Throwable;
 
 class Brand extends Model
 {
@@ -47,6 +51,30 @@ class Brand extends Model
             'default_audience' => filled($this->default_audience ?? null) ? trim($this->default_audience) : null,
             'palette' => $this->colors() ?: null,
         ]);
+    }
+
+    /** Copies an uploaded logo onto the banners disk, points the brand at it and removes the logo it replaced. */
+    public function storeBannerLogo(TemporaryUploadedFile $logo): void
+    {
+        $disk = config('campaigns.banners.disk');
+        $path = "brand-assets/{$this->workspace_id}/{$this->id}/banner-logo.".strtolower($logo->extension() ?: 'png');
+        $mimeType = $logo->getMimeType();
+        $previous = [$this->banner_logo_disk, $this->banner_logo_path];
+        // Streamed, not storeAs(): when both disks match, storeAs() moves the upload and later reads of it fail.
+        throw_unless(Storage::disk($disk)->writeStream($path, $logo->readStream()), RuntimeException::class, "The logo could not be written to the {$disk} disk.");
+
+        try {
+            $this->update(['banner_logo_disk' => $disk, 'banner_logo_path' => $path, 'banner_logo_mime_type' => $mimeType]);
+        } catch (Throwable $exception) {
+            if ($previous !== [$disk, $path]) {
+                Storage::disk($disk)->delete($path);
+            }
+            throw $exception;
+        }
+
+        if ($previous[1] && $previous !== [$disk, $path]) {
+            Storage::disk($previous[0])->delete($previous[1]);
+        }
     }
 
     public function workspace(): BelongsTo
