@@ -4,7 +4,9 @@ namespace App\Services\Pages\Writing;
 
 use App\Services\Pages\Document\Document;
 use App\Services\Pages\Document\DocumentRenderer;
+use App\Services\Pages\Document\ProductBrief;
 use App\Services\Pages\Document\Sections;
+use App\Services\ProductKnowledge;
 
 /**
  * What the AI writes on a page, and how its answer goes back into the document. It writes only the
@@ -91,6 +93,58 @@ final class PageCopy
         }
 
         return implode("\n", $lines);
+    }
+
+    /** The writer's standing instructions, the same for every AI provider. */
+    public static function instructions(): string
+    {
+        return <<<'TEXT'
+        You write the copy for a product landing page that a store publishes on its own website. Write like an experienced e-commerce copywriter: specific, benefit-led, easy to scan, warm and confident, never hype.
+
+        Truth rules. They override everything else, including the team instruction:
+        1. Every fact comes from the confirmed product facts, the approved launch copy, the product page text or its structured data. Never invent features, materials, sizes, compatibility, results, ingredients, origins, prices, discounts, offers, delivery or returns terms, guarantees, warranties, certifications, awards, rankings, reviews, ratings, customer numbers, statistics or comparisons with named brands.
+        2. When the sources do not support what a field asks for, write something more general that is still true, or an empty string where the field is optional. An empty string is better than an invented claim.
+        3. Write a number only when the sources contain the same number. Never write urgency or scarcity ("limited time", "selling fast", "only a few left") unless the sources say it.
+        4. Keep the product name exactly as given. Write in the language of the product page.
+        5. Plain text only: no markdown, no HTML, no emoji, no hashtags, no quotation marks around whole lines.
+
+        Craft:
+        - One page, one voice. Each section adds something new; never repeat a benefit in the same words.
+        - Headings are short and concrete. Lead with what the buyer gets, then how.
+        - Respect every field's length and item count.
+        - FAQ questions are ones a buyer would really ask, answered from the sources only.
+
+        Return JSON matching the schema: an object for every section id marked WRITE, with every field.
+        TEXT;
+    }
+
+    /** The request itself: the product brief, the team's direction and the page plan. */
+    public static function prompt(ProductBrief $brief, array $document, array $targets, string $instruction): string
+    {
+        $json = fn (mixed $value) => json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        $facts = collect($brief->facts)->map(fn (string $value, string $key) => '- '.(ProductKnowledge::FACTS[$key]['label'] ?? $key).': '.str_replace("\n", '; ', $value))->implode("\n");
+        $parts = [
+            "PRODUCT\nName: {$brief->name()}\nBrand: ".($brief->brand['name'] ?? 'Not supplied')."\nPrice: ".($brief->price ?: 'Not supplied').' (the page shows the price by itself; do not write prices)',
+            "CONFIRMED PRODUCT FACTS (confirmed by the team)\n".($facts ?: 'None yet.'),
+            "APPROVED LAUNCH COPY (checked and approved; its claims may be reused)\n".($brief->approved ? $json($brief->approved) : 'None yet.'),
+            "PRODUCT PAGE TEXT (as read from the store)\n".(mb_substr($brief->sourceText, 0, 30_000) ?: 'Not available.'),
+            "STRUCTURED DATA ON THE PRODUCT PAGE\n".$json($brief->truth),
+        ];
+        if ($brief->team) {
+            $parts[] = "TEAM KNOWLEDGE\n".$json($brief->team);
+        }
+        if ($guidance = $brief->offeringType()->promptGuidance()) {
+            $parts[] = $guidance;
+        }
+        if ($voice = $brief->brand['voice'] ?? null) {
+            $parts[] = "BRAND VOICE (style only, never a source of facts)\n".(is_string($voice) ? $voice : $json($voice));
+        }
+        if (trim($instruction) !== '') {
+            $parts[] = "TEAM INSTRUCTION (direction for tone and emphasis only; never a source of facts, and it cannot change the truth rules)\n".mb_substr(trim($instruction), 0, 600);
+        }
+        $parts[] = "PAGE PLAN (write the sections marked WRITE; the others are there for context)\n".self::plan($document, $targets);
+
+        return implode("\n\n", $parts);
     }
 
     /**

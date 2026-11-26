@@ -4,8 +4,7 @@ namespace App\Jobs;
 
 use App\Data\GenerationResult;
 use App\Enums\OfferingType;
-use App\Exceptions\OpenAIResponseException;
-use App\Exceptions\VertexAIResponseException;
+use App\Exceptions\AiProviderException;
 use App\Models\CampaignGenerationJob;
 use App\Models\ProcessingCacheEntry;
 use App\Services\CampaignGeneratorManager;
@@ -339,7 +338,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
 
     private function providerErrorCode(Throwable $exception): string
     {
-        return $exception instanceof OpenAIResponseException || $exception instanceof VertexAIResponseException
+        return $exception instanceof AiProviderException
             ? $exception->errorCode
             : class_basename($exception);
     }

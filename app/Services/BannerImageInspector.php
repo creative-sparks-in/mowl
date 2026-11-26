@@ -2,8 +2,7 @@
 
 namespace App\Services;
 
-use App\Exceptions\VertexAIResponseException;
-use Illuminate\Http\Client\Response;
+use App\Contracts\BannerModels;
 
 /**
  * Looks at a generated banner background for readable third-party text: book covers on a screen,
@@ -12,9 +11,7 @@ use Illuminate\Http\Client\Response;
  */
 class BannerImageInspector
 {
-    private static bool $thinkingRejected = false;
-
-    public function __construct(private GoogleVertexAIClient $client) {}
+    public function __construct(private BannerModels $models) {}
 
     /**
      * Only the generated image is sent. When the product photo was sent alongside it, the model listed
@@ -47,49 +44,33 @@ class BannerImageInspector
             .($cutout ? "Also list in other_objects every object in this image that is not part of {$product} itself, such as a vase, candle, plant, cup, book or device; leave it empty if only {$product} is shown. " : '')
             .'Return JSON only.';
         [$mimeType, $imageBytes] = $this->smaller($mimeType, $imageBytes);
-        $properties = ['marks' => ['type' => 'ARRAY', 'items' => ['type' => 'STRING']]];
+        $properties = ['marks' => ['type' => 'array', 'items' => ['type' => 'string']]];
         if ($sceneOnly) {
-            $properties['product_shown'] = ['type' => 'BOOLEAN'];
-            $properties['spot_found'] = ['type' => 'BOOLEAN'];
+            $properties['product_shown'] = ['type' => 'boolean'];
+            $properties['spot_found'] = ['type' => 'boolean'];
             foreach (['spot_x', 'spot_y', 'spot_width'] as $name) {
-                $properties[$name] = ['type' => 'INTEGER'];
+                $properties[$name] = ['type' => 'integer'];
             }
         }
         if ($cutout) {
-            $properties['other_objects'] = ['type' => 'ARRAY', 'items' => ['type' => 'STRING']];
+            $properties['other_objects'] = ['type' => 'array', 'items' => ['type' => 'string']];
         }
-        $parts = [
-            ['text' => $prompt],
-            ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)]],
-        ];
-        $response = $this->ask([
-            'contents' => [['role' => 'user', 'parts' => $parts]],
-            'generationConfig' => [
-                'temperature' => 0,
-                'responseMimeType' => 'application/json',
-                'responseSchema' => [
-                    'type' => 'OBJECT',
-                    'properties' => $properties,
-                    'required' => array_keys($properties),
-                ],
-            ],
-        ]);
+        $answer = $this->models->look($prompt, [['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)]], self::schema($properties));
 
-        $json = $response->json();
-        if ($this->cutShort($json)) {
+        if ($answer['cut_short']) {
             // Only an image full of text runs a list of its marks past the cap; it is not a clean one.
             return [
                 'marks' => ['more readable text than could be listed'],
                 'product_shown' => false,
                 'other_objects' => [],
                 'spot' => null,
-                'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
-                'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+                'input_tokens' => $answer['input_tokens'],
+                'output_tokens' => $answer['output_tokens'],
             ];
         }
-        $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
+        $decoded = $answer['answer'];
         if (! is_array($decoded) || ! is_array($decoded['marks'] ?? null) || ($sceneOnly && ! is_bool($decoded['product_shown'] ?? null)) || ($cutout && ! is_array($decoded['other_objects'] ?? null))) {
-            throw new VertexAIResponseException('vertex_invalid_inspection', 'Vertex AI returned no banner image inspection.', true);
+            throw $this->models->failure('invalid_inspection', 'returned no banner image inspection.');
         }
 
         return [
@@ -97,9 +78,8 @@ class BannerImageInspector
             'product_shown' => $sceneOnly && $decoded['product_shown'],
             'other_objects' => $cutout ? array_values(array_filter(array_map(fn ($object) => is_string($object) ? trim($object) : '', $decoded['other_objects']))) : [],
             'spot' => $sceneOnly ? $this->spot($decoded) : null,
-            'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
-            // Thinking tokens are billed as output too.
-            'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+            'input_tokens' => $answer['input_tokens'],
+            'output_tokens' => $answer['output_tokens'],
         ];
     }
 
@@ -122,46 +102,32 @@ class BannerImageInspector
         [$mimeType, $imageBytes] = $this->smaller($mimeType, $imageBytes);
         // A store's full-size photo can exceed the model's inline image limit, so it is shrunk too.
         [$photoMime, $photoBytes] = $this->smaller((string) $photo['mimeType'], (string) base64_decode((string) $photo['data']));
-        $response = $this->ask([
-            'contents' => [['role' => 'user', 'parts' => [
-                ['text' => $prompt],
-                ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)]],
-                ['inlineData' => ['mimeType' => $photoMime, 'data' => base64_encode($photoBytes)]],
-            ]]],
-            'generationConfig' => [
-                'temperature' => 0,
-                'responseMimeType' => 'application/json',
-                'responseSchema' => [
-                    'type' => 'OBJECT',
-                    'properties' => ['matches' => ['type' => 'BOOLEAN'], 'differences' => ['type' => 'STRING'], 'split' => ['type' => 'BOOLEAN']],
-                    'required' => ['matches', 'differences', 'split'],
-                ],
-            ],
-        ]);
+        $answer = $this->models->look($prompt, [
+            ['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)],
+            ['mimeType' => $photoMime, 'data' => base64_encode($photoBytes)],
+        ], self::schema(['matches' => ['type' => 'boolean'], 'differences' => ['type' => 'string'], 'split' => ['type' => 'boolean']]));
 
-        $json = $response->json();
-        if ($this->cutShort($json)) {
+        if ($answer['cut_short']) {
             // A comparison that ran past the cap gave no verdict; the image is redrawn, and the check billed.
             return [
                 'matches' => false,
                 'differences' => 'The product check ran too long to give an answer.',
                 'split' => false,
-                'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
-                'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+                'input_tokens' => $answer['input_tokens'],
+                'output_tokens' => $answer['output_tokens'],
             ];
         }
-        $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
+        $decoded = $answer['answer'];
         if (! is_array($decoded) || ! is_bool($decoded['matches'] ?? null) || ! is_bool($decoded['split'] ?? null)) {
-            throw new VertexAIResponseException('vertex_invalid_inspection', 'Vertex AI returned no product match check.', true);
+            throw $this->models->failure('invalid_inspection', 'returned no product match check.');
         }
 
         return [
             'matches' => $decoded['matches'],
             'differences' => trim((string) ($decoded['differences'] ?? '')),
             'split' => $decoded['split'],
-            'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
-            // Thinking tokens are billed as output too.
-            'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+            'input_tokens' => $answer['input_tokens'],
+            'output_tokens' => $answer['output_tokens'],
         ];
     }
 
@@ -181,36 +147,10 @@ class BannerImageInspector
         return ['x' => $values[0] / 1000, 'y' => $values[1] / 1000, 'width' => $values[2] / 1000];
     }
 
-    private function cutShort(?array $json): bool
+    /** Every property is required and no other is allowed, as strict structured output demands. */
+    private static function schema(array $properties): array
     {
-        return strtoupper((string) data_get($json, 'candidates.0.finishReason')) === 'MAX_TOKENS';
-    }
-
-    /**
-     * A yes/no look at an image needs little reasoning, and long default thinking can run past the
-     * inspection timeout with nothing sent back. A model that rejects the setting is asked without it.
-     */
-    private function ask(array $payload): Response
-    {
-        // A short answer is all a check needs. Without a cap, a model listing marks can loop on and on
-        // and hold the connection silently until the timeout, losing an image that was already paid for.
-        $payload['generationConfig']['maxOutputTokens'] = (int) config('campaigns.banners.inspection_max_output_tokens', 2048);
-        $level = (string) config('campaigns.banners.inspection_thinking_level');
-        if ($level !== '' && ! self::$thinkingRejected) {
-            $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $level];
-        }
-        try {
-            [$response] = $this->client->generateContent($payload, config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 30));
-        } catch (VertexAIResponseException $exception) {
-            if (! isset($payload['generationConfig']['thinkingConfig']) || $exception->errorCode !== 'vertex_http_400' || ! str_contains(strtolower($exception->getMessage()), 'thinking')) {
-                throw $exception;
-            }
-            self::$thinkingRejected = true;
-            unset($payload['generationConfig']['thinkingConfig']);
-            [$response] = $this->client->generateContent($payload, config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 30));
-        }
-
-        return $response;
+        return ['type' => 'object', 'properties' => $properties, 'required' => array_keys($properties), 'additionalProperties' => false];
     }
 
     /**

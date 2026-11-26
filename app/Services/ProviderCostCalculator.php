@@ -22,9 +22,10 @@ class ProviderCostCalculator
         );
     }
 
-    public function calculateBanner(int $inputTokens, int $outputTextTokens, int $outputImageTokens): float
+    /** OpenAI image models are priced from their own table; anything else at the Gemini image model's rates. */
+    public function calculateBanner(int $inputTokens, int $outputTextTokens, int $outputImageTokens, ?string $model = null): float
     {
-        $prices = config('campaigns.banners.prices_per_million');
+        $prices = config('campaigns.banners.openai.prices_per_million')[$model] ?? config('campaigns.banners.prices_per_million');
 
         return round((
             ($inputTokens * $prices['input'])

@@ -2,9 +2,12 @@
 
 namespace App\Providers;
 
+use App\Contracts\BannerModels;
 use App\Http\Middleware\EnforceWorkspaceRole;
 use App\Livewire\Hooks\EnforceRoleOnActions;
+use App\Services\GoogleBannerModels;
 use App\Services\GoogleCloudAccessTokenProvider;
+use App\Services\OpenAIBannerModels;
 use App\Support\GenerationDeadline;
 use AzureOss\Storage\Blob\BlobServiceClient;
 use AzureOss\Storage\BlobFlysystem\AzureBlobStorageAdapter;
@@ -28,6 +31,8 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->singleton(GoogleCloudAccessTokenProvider::class);
         $this->app->singleton(GenerationDeadline::class);
+        // Banners draw on Gemini unless BANNER_GENERATOR asks for OpenAI.
+        $this->app->bind(BannerModels::class, fn ($app) => $app->make(config('campaigns.banners.generator') === 'openai' ? OpenAIBannerModels::class : GoogleBannerModels::class));
         // Registered before Livewire boots its hook registry, which only wires hooks it already knows.
         ComponentHookRegistry::register(EnforceRoleOnActions::class);
     }
