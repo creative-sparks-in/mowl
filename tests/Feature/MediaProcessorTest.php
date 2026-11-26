@@ -108,6 +108,38 @@ class MediaProcessorTest extends TestCase
         $this->assertSame([512, 341, IMAGETYPE_JPEG], array_slice(getimagesize($derivative), 0, 3));
     }
 
+    public function test_without_ffmpeg_an_image_too_large_to_decode_is_refused_before_decoding(): void
+    {
+        Storage::fake('local');
+        $this->withoutFfmpeg();
+        [$workspace, $product] = $this->productFixture();
+        ob_start();
+        imagepng(imagecreatetruecolor(8, 8));
+        // The header claims 5000 x 5000 pixels: more than GD may decode, whatever the file's size.
+        $bomb = substr_replace((string) ob_get_clean(), pack('NN', 5000, 5000), 16, 8);
+        Storage::disk('local')->put('originals/bomb.png', $bomb);
+        $asset = MediaAsset::create([
+            'workspace_id' => $workspace->id,
+            'product_id' => $product->id,
+            'type' => 'image',
+            'disk' => 'local',
+            'path' => 'originals/bomb.png',
+            'original_name' => 'bomb.png',
+            'mime_type' => 'image/png',
+            'size_bytes' => strlen($bomb),
+            'content_hash' => hash('sha256', $bomb),
+        ]);
+
+        try {
+            app(MediaProcessor::class)->process($asset);
+            $this->fail('An image over the pixel limit was decoded.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('The image could not be decoded or is too large.', $exception->getMessage());
+        }
+
+        $this->assertSame('failed', $asset->fresh()->status);
+    }
+
     public function test_without_ffmpeg_an_mp4_video_is_transcribed_from_the_original_file(): void
     {
         Storage::fake('local');

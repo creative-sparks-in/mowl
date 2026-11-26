@@ -182,12 +182,15 @@ class MediaProcessor
                 '-vf', 'scale=512:-2:force_original_aspect_ratio=decrease,format=yuvj420p', '-frames:v', '1', '-q:v', '3', $output,
             ]);
         } else {
-            // Without ffmpeg (Vercel's PHP runtime) GD makes the same 512px-wide JPEG.
-            $image = @imagecreatefromstring((string) file_get_contents($sourcePath));
-            if (! $image) {
-                throw new RuntimeException('The image could not be decoded.');
+            // Without ffmpeg (Vercel's PHP runtime) GD makes the same 512px-wide JPEG. A small compressed
+            // file can decode to hundreds of MB, so its size is read from the header before it is decoded.
+            $size = @getimagesize($sourcePath);
+            $image = $size && $size[0] * $size[1] <= ProductImageImporter::MAX_PIXELS ? @imagecreatefromstring((string) file_get_contents($sourcePath)) : false;
+            $scaled = $image ? imagescale($image, 512) : false;
+            if (! $scaled) {
+                throw new RuntimeException('The image could not be decoded or is too large.');
             }
-            imagejpeg(imagescale($image, 512), $output, 85);
+            imagejpeg($scaled, $output, 85);
         }
         $path = "campaign-media/{$asset->workspace_id}/{$asset->product_id}/derived/{$asset->content_hash}/image.jpg";
         Storage::disk($asset->disk)->put($path, file_get_contents($output));
