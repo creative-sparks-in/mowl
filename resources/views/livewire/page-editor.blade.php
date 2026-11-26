@@ -485,6 +485,9 @@
                 <button type="button" class="iconbtn" wire:click="closeDrawer" aria-label="Close"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
             <div class="row"><span class="tag {{ $state['tone'] }}"><span class="dot"></span>{{ $state['label'] }}</span></div>
+            @if($product->offeringType() !== \App\Enums\OfferingType::Physical)
+                <div class="banner xs"><i class="ti ti-info-circle" aria-hidden="true"></i><span>{{ \App\Enums\OfferingType::PUBLISHING_NOTE }}</span></div>
+            @endif
 
             <section class="pe-pub-block">
                 <div class="kv">

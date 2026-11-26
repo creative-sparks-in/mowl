@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Enums\OfferingType;
 use App\Models\BannerCreative;
 use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
@@ -688,6 +689,8 @@ class CampaignWorkspace extends Component
                 ->where('metadata->origin', 'product_page')
                 ->oldest()
                 ->first(),
+            // Software and service banners are drawn without a product photo.
+            'bannerNeedsPhoto' => ! $pack || $pack->product->offeringType() === OfferingType::Physical,
             'bannerCreditBalance' => $workspace->spendableCredits(),
             'bannerProcessUrl' => $nextBannerCreative && config('campaigns.processing_mode') === 'request'
                 ? URL::temporarySignedRoute('banner-creatives.process', now()->addMinutes(30), ['bannerCreative' => $nextBannerCreative])

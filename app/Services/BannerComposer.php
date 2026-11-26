@@ -18,8 +18,11 @@ class BannerComposer
         $this->font = resource_path('fonts/DM-Sans.ttf');
     }
 
-    /** @param  array{x: float, y: float, width: float}|null  $productSpot  the scene's empty resting spot, as shares of its width and height */
-    public function compose(string $backgroundBytes, Brand $brand, BannerCreative $creative, ?string $productCutout = null, ?array $productSpot = null): string
+    /**
+     * @param  array{x: float, y: float, width: float}|null  $productSpot  the scene's empty resting spot, as shares of its width and height
+     * @param  string|null  $screenshot  a software product's app screenshot, framed as a window in the product's slot
+     */
+    public function compose(string $backgroundBytes, Brand $brand, BannerCreative $creative, ?string $productCutout = null, ?array $productSpot = null, ?string $screenshot = null): string
     {
         $source = @imagecreatefromstring($backgroundBytes);
         if (! $source) {
@@ -49,6 +52,9 @@ class BannerComposer
         $this->drawReadabilityLayer($canvas, $creative->layout, $width, $height);
         if ($productCutout !== null) {
             $this->drawProduct($canvas, $productCutout, $creative->layout, $productSpot);
+        }
+        if ($screenshot !== null) {
+            $this->drawScreenshot($canvas, $screenshot, $creative->layout);
         }
         // The wordmark sits in the same bottom-right corner on every layout, over a soft dark scrim.
         $this->drawBrandScrim($canvas, $width, $height, $this->logoIsDark($brand));
@@ -206,6 +212,34 @@ class BannerComposer
         imagealphablending($canvas, true);
         imagecopy($canvas, $product, $x, $y, 0, 0, $width, $height);
         imagedestroy($product);
+    }
+
+    /**
+     * An app screenshot in a plain dark window (a bezel and a top bar), standing in the product's slot.
+     * It is UI, not a photographed object, so it is drawn crisp: no light match and no softened edges.
+     */
+    private function drawScreenshot(\GdImage $canvas, string $screenshotBytes, ?string $layout): void
+    {
+        $screenshot = @imagecreatefromstring($screenshotBytes);
+        if (! $screenshot) {
+            throw new RuntimeException('The app screenshot is not a supported image.');
+        }
+        [$bezel, $bar, $radius] = [12, 34, 18];
+        $slot = self::productSlot($layout);
+        $fit = min(($slot['width'] - 2 * $bezel) / imagesx($screenshot), ($slot['height'] - $bezel - $bar) / imagesy($screenshot));
+        $width = max(1, (int) round(imagesx($screenshot) * $fit));
+        $height = max(1, (int) round(imagesy($screenshot) * $fit));
+        $x = $slot['x'] - intdiv($width, 2) - $bezel;
+        $y = $slot['base'] - $height - $bezel - $bar;
+        imagealphablending($canvas, true);
+        $frame = imagecolorallocate($canvas, 24, 28, 36);
+        imagefilledrectangle($canvas, $x + $radius, $y, $x + $width + 2 * $bezel - $radius, $slot['base'], $frame);
+        imagefilledrectangle($canvas, $x, $y + $radius, $x + $width + 2 * $bezel, $slot['base'] - $radius, $frame);
+        foreach ([[$x + $radius, $y + $radius], [$x + $width + 2 * $bezel - $radius, $y + $radius], [$x + $radius, $slot['base'] - $radius], [$x + $width + 2 * $bezel - $radius, $slot['base'] - $radius]] as [$cornerX, $cornerY]) {
+            imagefilledellipse($canvas, $cornerX, $cornerY, 2 * $radius, 2 * $radius, $frame);
+        }
+        imagecopyresampled($canvas, $screenshot, $x + $bezel, $y + $bar, 0, 0, $width, $height, imagesx($screenshot), imagesy($screenshot));
+        imagedestroy($screenshot);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\OfferingType;
 use App\Models\CampaignPackVersion;
 
 class BannerCopySelector
@@ -77,17 +78,18 @@ class BannerCopySelector
         // currency amount are used only when nothing else is approved.
         $withoutAmounts = array_values(array_filter($supportPool, fn (string $text): bool => $validator->unsupportedPrices($text, []) === []));
         $supportPool = $withoutAmounts ?: $supportPool;
+        $type = $version->campaignPack?->product?->offeringType() ?? OfferingType::Physical;
 
         return [
             ...$direction,
             'headline' => $headline,
             'supporting_text' => $supportPool[($sequence - 1) % max(1, count($supportPool))] ?? null,
-            'cta' => 'Shop now',
-            'prompt' => $this->prompt($version, $content, $direction, $sequence),
+            'cta' => $type->cta(),
+            'prompt' => $this->prompt($version, $content, $direction, $sequence, $type),
         ];
     }
 
-    private function prompt(CampaignPackVersion $version, array $content, array $direction, int $sequence): string
+    private function prompt(CampaignPackVersion $version, array $content, array $direction, int $sequence, OfferingType $type): string
     {
         $product = (string) data_get($content, 'product_truth.name', 'the supplied product');
         $brand = (string) data_get($content, 'product_truth.brand', 'the approved brand');
@@ -112,6 +114,9 @@ class BannerCopySelector
         $benefit = $benefits[($sequence - 1) % max(1, count($benefits))] ?? '';
         $audience = $audiences[0] ?? '';
         $productDna = implode('; ', array_slice(array_values(array_unique([...$facts, ...$benefits])), 0, 6)) ?: $product;
+        if ($type !== OfferingType::Physical) {
+            return $this->offerScenePrompt($type, $product, $brand, $direction, $benefit, $audience);
+        }
         if (config('campaigns.banners.composite_product')) {
             return $this->scenePrompt($product, $brand, $direction, $benefit, $audience);
         }
@@ -142,6 +147,27 @@ class BannerCopySelector
             ."{$quiet} The quiet area must be a natural, softly lit continuation of the same scene: no flat colour block, no split-screen and no hard vertical or horizontal boundary. Keep the bottom-right corner simple for a small brand mark. "
             .'Keep the set minimal: a surface, a backdrop and at most one or two small, plain, out-of-focus props away from the resting spot. '
             .'Do not include any text, letters, numbers, logos, labels, captions, UI, signatures, borders or watermarks. No books, magazines, screens, packaging or posters. No readable text anywhere. Clean commercial art direction, 4:5 composition.');
+    }
+
+    /**
+     * Software and services have no product photo to show, so the image model draws the whole scene.
+     * It must not open with SCENE_OPENING: the generator reads that opening as "composite a product cutout".
+     */
+    private function offerScenePrompt(OfferingType $type, string $product, string $brand, array $direction, string $benefit, string $audience): string
+    {
+        [$side, $quiet] = match ($direction['layout']) {
+            'split_left' => ['the right half of the frame', 'Keep the left half visually quiet for an overlay.'],
+            'bottom_panel' => ['the centre of the frame', 'Keep the bottom 38% visually quiet for an overlay.'],
+            default => ['the lower half of the frame, slightly right of centre', 'Keep the upper-left 46% visually quiet for an overlay.'],
+        };
+        $scene = $type === OfferingType::Software
+            ? "Show a clean, bright, modern scene that suits this audience, with no physical product and no readable screens: any laptop, phone or monitor is switched off or turned away. Leave a clear, uncluttered area in {$side}, so an app window can be placed there afterwards."
+            : 'Show a warm, natural people or lifestyle scene that suits this audience and the benefit: people enjoying the result of the service. Show no product.';
+
+        return trim("Create one premium, photorealistic vertical 4:5 advertising scene for {$product}. Brand context: {$brand}; use it only for palette and mood. Direction: {$direction['label']}. Approved benefit context: {$benefit}. Approved audience context: {$audience}. "
+            ."{$scene} Light it brightly with soft, diffused daylight. "
+            ."{$quiet} The quiet area must be a natural, softly lit continuation of the same scene: no flat colour block, no split-screen and no hard vertical or horizontal boundary. Keep the bottom-right corner simple for a small brand mark. "
+            .'Do not include any text, letters, numbers, logos, labels, captions, UI, signatures, borders or watermarks. Show no third-party intellectual property: no real book covers, film, game or app imagery, and no other brands\' logos or trademarks. No readable text anywhere. Clean commercial art direction, 4:5 composition.');
     }
 
     /** Drops a bracketed working label such as "(Diwali Focus)" from an internal angle title. */

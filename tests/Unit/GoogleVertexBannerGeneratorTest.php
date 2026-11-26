@@ -76,6 +76,33 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             && $request['contents'][0]['parts'][1]['inlineData']['data'] === $generated);
     }
 
+    public function test_software_and_service_scenes_are_drawn_from_the_prompt_alone_with_no_product_checks(): void
+    {
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        config()->set('campaigns.banners.check_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            // A people scene can look like "the product"; with no product to composite that must not reject it.
+            'aiplatform.googleapis.com/*gemini-3.5-flash:*' => Http::response(self::inspection([], productShown: true)),
+            'aiplatform.googleapis.com/*' => Http::response(self::image('scene')),
+        ]);
+        $creative = new BannerCreative(['prompt' => 'Create one premium, photorealistic vertical 4:5 advertising scene for Planner Pro.']);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect());
+
+        $this->assertSame('scene', $result->imageBytes);
+        $this->assertNull($result->productCutout);
+        Http::assertSentCount(5);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/models/gemini-3.1-flash-image:generateContent')
+            && count($request['contents'][0]['parts']) === 1);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/models/gemini-3.5-flash:generateContent')
+            && ! str_contains($request['contents'][0]['parts'][0]['text'], 'product_shown'));
+    }
+
     public function test_a_background_with_a_real_book_cover_is_regenerated_and_every_attempt_is_costed(): void
     {
         Storage::fake('local');

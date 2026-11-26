@@ -2,6 +2,7 @@
 
 namespace App\Services\Pages;
 
+use App\Enums\OfferingType;
 use App\Models\ContentVersion;
 use App\Models\Page;
 use App\Models\PageVersion;
@@ -139,6 +140,10 @@ class PagePublisher
             }
             if ($store->workspace_id !== $page->workspace_id || ($store->brand_id && $store->brand_id !== $page->product?->brand_id)) {
                 throw ValidationException::withMessages(['publish' => "{$store->name} belongs to another brand. Choose this product's store, then publish again."]);
+            }
+            // A store chosen before the product's type changed, or a rollback, must not reach WooCommerce either.
+            if ($store->driver === 'woocommerce' && ($page->product?->offeringType() ?? OfferingType::Physical) !== OfferingType::Physical) {
+                throw ValidationException::withMessages(['publish' => OfferingType::PUBLISHING_NOTE]);
             }
             if (! $store->isConnected()) {
                 throw ValidationException::withMessages(['publish' => "{$store->name} needs attention. Reconnect it in Settings, then publish again."]);
