@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Exceptions\OpenAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Services\CampaignPackSafetyValidator;
 use App\Services\MockCampaignPackGenerator;
 use App\Services\OpenAIResponsesCampaignPackGenerator;
 use App\Support\VoiceoverTiming;
@@ -203,6 +204,54 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         $this->assertSame([3600, 600, 1500], [$result->inputTokens, $result->cachedInputTokens, $result->outputTokens]);
     }
 
+    public function test_a_shot_that_repeats_a_blocked_line_is_rewritten_with_its_segment_not_on_its_own(): void
+    {
+        $this->configureGenerator();
+        $output = $this->campaignOutput();
+        // The price check reads every string, so it blocks the line in the voiceover and again in the shot plan.
+        $output['creative_routes'][0]['voiceover'][0]['line'] = 'Yours today for $45.';
+        $output['creative_routes'][0]['shot_plan'][0]['voiceover_line'] = 'Yours today for $45.';
+        Http::fakeSequence()
+            ->push($this->responsePayload($output))
+            ->push($this->responsePayload(['rewrites' => [['id' => 'creative_routes.0.voiceover.0.line', 'text' => 'Yours today.']]]));
+
+        $route = $this->generate()->content['creative_routes'][0];
+
+        $this->assertSame(['Yours today.', 'Yours today.'], [$route['voiceover'][0]['line'], $route['shot_plan'][0]['voiceover_line']]);
+        Http::assertSentCount(2);
+        $this->assertSame(['creative_routes.0.voiceover.0.line'], array_column(json_decode(Http::recorded()[1][0]['input'][1]['content'][0]['text'], true), 'id'));
+    }
+
+    public function test_a_link_the_check_blocks_is_never_sent_for_rewording(): void
+    {
+        $this->configureGenerator();
+        $url = 'https://example.com/organic/tote';
+        $output = $this->campaignOutput($url);
+        Http::fakeSequence()->push($this->responsePayload($output));
+
+        $result = $this->generate($url);
+
+        // "organic" is in the address and nowhere on the page, so the check blocks the pack's links
+        // and the SMS that carries one. None of them is prose that can be reworded.
+        $blocked = array_column(app(CampaignPackSafetyValidator::class)->issues($result->content, $result->evidence, $result->complianceFlags, new SourceSnapshot(['url' => $url])), 'path');
+        $this->assertContains('marketing_hub.channels.google_ads.search.final_url', $blocked);
+        $this->assertContains('marketing_hub.channels.email_sms.sms_messages.0', $blocked);
+        $this->assertSame($url, $result->content['marketing_hub']['channels']['google_ads']['search']['final_url']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_rewrite_that_changes_a_link_in_the_line_is_not_used(): void
+    {
+        $this->configureGenerator();
+        $output = $this->campaignOutput();
+        $line = $output['marketing_hub']['channels']['email_sms']['sms_messages'][0] = 'Guaranteed to fit your day: https://example.com/tote';
+        $changed = $this->responsePayload(['rewrites' => [['id' => 'marketing_hub.channels.email_sms.sms_messages.0', 'text' => 'Made to fit your day: https://example.com/totes']]]);
+        Http::fakeSequence()->push($this->responsePayload($output))->push($changed)->push($changed);
+
+        $this->assertSame($line, $this->generate()->content['marketing_hub']['channels']['email_sms']['sms_messages'][0]);
+        Http::assertSentCount(3);
+    }
+
     public function test_a_failed_rewrite_keeps_the_generated_pack(): void
     {
         $this->configureGenerator();
@@ -348,11 +397,11 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         config()->set('campaigns.openai.retry_backoff_ms', [0, 0]);
     }
 
-    private function generate()
+    private function generate(string $url = 'https://example.com/tote')
     {
         return app(OpenAIResponsesCampaignPackGenerator::class)->generate(
             new Product(['name' => 'Canvas Tote', 'price' => '$89']),
-            new SourceSnapshot(['url' => 'https://example.com/tote']),
+            new SourceSnapshot(['url' => $url]),
             ['description' => 'Everyday tote', 'content' => 'A roomy canvas tote.', 'product_truth' => ['name' => 'Canvas Tote']],
         );
     }
@@ -393,11 +442,11 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         return $output;
     }
 
-    private function campaignOutput(): array
+    private function campaignOutput(string $url = 'https://example.com/tote'): array
     {
         $result = app(MockCampaignPackGenerator::class)->generate(
             new Product(['name' => 'Canvas Tote', 'price' => '$89']),
-            new SourceSnapshot(['url' => 'https://example.com/tote']),
+            new SourceSnapshot(['url' => $url]),
             ['description' => 'Everyday tote', 'content' => 'A roomy canvas tote.', 'product_truth' => ['name' => 'Canvas Tote']],
         );
 

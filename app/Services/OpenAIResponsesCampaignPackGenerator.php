@@ -19,6 +19,8 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
     /** How many times the lines the approval check blocks are sent back for a rewrite. */
     private const REPAIR_ROUNDS = 2;
 
+    private const LINK = '#https?://\S+#i';
+
     public function __construct(private OpenAIClient $client) {}
 
     public function generate(Product $product, SourceSnapshot $source, array $page): GenerationResult
@@ -220,7 +222,8 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             foreach (is_array($decoded) && is_array($decoded['rewrites'] ?? null) ? $decoded['rewrites'] : [] as $rewrite) {
                 $path = is_array($rewrite) ? (string) ($rewrite['id'] ?? '') : '';
                 $text = is_array($rewrite) ? trim((string) ($rewrite['text'] ?? '')) : '';
-                if (! isset($lines[$path]) || $text === '') {
+                // A rewrite that drops or changes a link is not used.
+                if (! isset($lines[$path]) || $text === '' || $this->links($text) !== $this->links($lines[$path]['text'])) {
                     continue;
                 }
                 data_set($content, $path, $text);
@@ -240,6 +243,14 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         return $result;
     }
 
+    /** @return list<string> */
+    private function links(string $text): array
+    {
+        preg_match_all(self::LINK, $text, $links);
+
+        return $links[0];
+    }
+
     /** @return array<string, array{text: string, problem: string}> content path => the line and why the approval check blocks it */
     private function blockedLines(GenerationResult $result, SourceSnapshot $source): array
     {
@@ -257,14 +268,28 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         foreach (app(CampaignPackSafetyValidator::class)->issues($result->content, $result->evidence, $result->complianceFlags, $source) as $issue) {
             // Only copy is reworded: a verified fact repeats its evidence record word for word, and a
             // price field holds the product's own price.
-            if (isset($issue['path'], $issue['text']) && ! preg_match('/\.verified_facts\.|(^|\.)price$/', $issue['path'])) {
-                $lines[$issue['path']] ??= [
-                    'text' => $issue['text'],
-                    'problem' => isset($issue['term'])
-                        ? "Says \"{$issue['term']}\", which the product page does not support. Say it without that."
-                        : 'States a price the product page does not show. Say it without that price.',
-                ];
+            if (! isset($issue['path'], $issue['text']) || preg_match('/\.verified_facts\.|(^|\.)price$/', $issue['path'])) {
+                continue;
             }
+            // A link must keep pointing at the same page, so wording found only inside one is left alone.
+            $prose = trim((string) preg_replace(self::LINK, '', $issue['text']));
+            if ($prose === '' || (isset($issue['term']) && ! str_contains(CampaignPackEvidence::normalize($prose), $issue['term']))) {
+                continue;
+            }
+            // A shot that repeats its segment's line is rewritten with that segment, so the two stay the same.
+            if (preg_match('/^creative_routes\.(\d+)\.shot_plan\.(\d+)\.voiceover_line$/', $issue['path'], $at)) {
+                $route = $result->content['creative_routes'][$at[1]];
+                $shotId = $route['shot_plan'][$at[2]]['id'] ?? null;
+                if (collect($route['voiceover'] ?? [])->contains(fn ($segment) => is_array($segment) && ($segment['shot_id'] ?? null) === $shotId && ($segment['line'] ?? null) === $issue['text'])) {
+                    continue;
+                }
+            }
+            $lines[$issue['path']] ??= [
+                'text' => $issue['text'],
+                'problem' => isset($issue['term'])
+                    ? "Says \"{$issue['term']}\", which the product page does not support. Say it without that."
+                    : 'States a price the product page does not show. Say it without that price.',
+            ];
         }
 
         return $lines;
@@ -281,7 +306,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
                     'role' => 'developer',
                     'content' => [[
                         'type' => 'input_text',
-                        'text' => 'You fix lines of a product marketing pack that failed a check. Rewrite each line so its problem is gone. Keep its meaning, tone and language, and keep it a complete, natural line. Use only what the line already says: add no facts, claims, numbers, prices or offers. When a word limit is given, count the words of your line before you return it. Return every line under the id it came with.',
+                        'text' => 'You fix lines of a product marketing pack that failed a check. Rewrite each line so its problem is gone. Keep its meaning, tone and language, and keep it a complete, natural line. Use only what the line already says: add no facts, claims, numbers, prices or offers, and keep any link exactly as it is. When a word limit is given, count the words of your line before you return it. Return every line under the id it came with.',
                     ]],
                 ],
                 [
