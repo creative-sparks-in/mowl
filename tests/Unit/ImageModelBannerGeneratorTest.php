@@ -11,7 +11,8 @@ use App\Models\SourceSnapshot;
 use App\Services\BannerCopySelector;
 use App\Services\BannerImageInspector;
 use App\Services\BannerReferenceImage;
-use App\Services\GoogleVertexBannerGenerator;
+use App\Services\GoogleBannerModels;
+use App\Services\ImageModelBannerGenerator;
 use App\Services\ProviderCostCalculator;
 use App\Support\GenerationDeadline;
 use Illuminate\Http\Client\ConnectionException;
@@ -24,7 +25,7 @@ use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
-class GoogleVertexBannerGeneratorTest extends TestCase
+class ImageModelBannerGeneratorTest extends TestCase
 {
     public function test_it_requests_one_k_4_by_5_image_with_only_the_first_product_reference_and_maps_usage(): void
     {
@@ -56,7 +57,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
         $secondAsset = new MediaAsset(['disk' => 'local', 'path' => 'second-product.png', 'mime_type' => 'image/png']);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset, $secondAsset]));
+        $result = app(ImageModelBannerGenerator::class)->generate($creative, collect([$asset, $secondAsset]));
 
         $this->assertSame('generated-image-bytes', $result->imageBytes);
         $this->assertSame(400, $result->inputTokens);
@@ -92,7 +93,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         ]);
         $creative = new BannerCreative(['prompt' => 'Create one premium, photorealistic vertical 4:5 advertising scene for Planner Pro.']);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect());
+        $result = app(ImageModelBannerGenerator::class)->generate($creative, collect());
 
         $this->assertSame('scene', $result->imageBytes);
         $this->assertNull($result->productCutout);
@@ -126,7 +127,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $creative = new BannerCreative(['prompt' => 'No text or logos.']);
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate($creative, collect([$asset]));
 
         $this->assertSame('blank-screen', $result->imageBytes);
         $this->assertSame(2 * 1290, $result->outputImageTokens);
@@ -150,7 +151,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
         try {
-            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
+            app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
             $this->fail('A background with a real book cover must not be used.');
         } catch (BannerAttemptFailed $exception) {
             $this->assertSame('banner_third_party_text', $exception->errorCode);
@@ -181,7 +182,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
         try {
-            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
+            app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
             $this->fail('A rejected background must not be used.');
         } catch (BannerAttemptFailed $exception) {
             $this->assertSame('banner_third_party_text', $exception->errorCode);
@@ -210,7 +211,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         ]);
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
 
         $this->assertSame('blank-screen', $result->imageBytes);
         Sleep::assertSleptTimes(2);
@@ -233,7 +234,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
         try {
-            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
+            app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
             $this->fail('A 429 with no time left must fail the attempt.');
         } catch (VertexAIResponseException $exception) {
             $this->assertSame('vertex_http_429', $exception->errorCode);
@@ -265,7 +266,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $creative = new BannerCreative(['prompt' => self::SCENE]);
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate($creative, collect([$asset]));
 
         $this->assertSame('banner-background', $result->imageBytes);
         $calculator = app(ProviderCostCalculator::class);
@@ -304,7 +305,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
         $this->fakeVertex(['banner-background']);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
 
         $this->assertSame('banner-background', $result->imageBytes);
         $this->assertStudioCutout($result->productCutout);
@@ -338,7 +339,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
 
         $this->assertSame('banner-background', $result->imageBytes);
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1);
@@ -360,7 +361,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/stand.jpg']]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand', 'extracted_truth' => ['name' => 'Kindle Stand']]));
 
-        app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'lamp.jpg'));
         // The imported photo, unconfirmed as the main photo, goes through the redraw instead.
@@ -387,7 +388,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $creative = new BannerCreative(['prompt' => self::SCENE]);
         $creative->setRelation('campaignPack', $pack);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate($creative, collect([$asset]));
 
         $this->assertStudioCutout($result->productCutout);
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'stand-new'));
@@ -421,7 +422,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/share.webp']]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
 
-        app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1
             && base64_decode($request['contents'][0]['parts'][1]['inlineData']['data']) === $main);
@@ -453,10 +454,10 @@ class GoogleVertexBannerGeneratorTest extends TestCase
                 return Http::response($response);
             },
         ]);
-        $property = new \ReflectionProperty(BannerImageInspector::class, 'thinkingRejected');
+        $property = new \ReflectionProperty(GoogleBannerModels::class, 'thinkingRejected');
 
         try {
-            $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+            $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
             $checked = app(BannerImageInspector::class)->inspect('banner-background', 'image/png', 'Kindle Stand', '');
         } finally {
             $property->setValue(null, false);
@@ -485,7 +486,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/stand.jpg']]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand', 'extracted_truth' => ['name' => 'Kindle Stand | Shop', 'sku' => 'TPR-1']]));
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         $this->assertStudioCutout($result->productCutout);
         Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1);
@@ -515,7 +516,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/og-share.png']]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         $this->assertStudioCutout($result->productCutout);
         Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1);
@@ -543,7 +544,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/stand-1.jpg']]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         $this->assertStudioCutout($result->productCutout);
         // The gallery photo was used; the product was never redrawn by the image model.
@@ -583,7 +584,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/share.webp']]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         $this->assertStudioCutout($result->productCutout);
         // The second photo's cutout was compared with the main photo (two images in one request).
@@ -619,7 +620,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/walnut.jpg', 'candidate_rank' => 1]]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         $this->assertStudioCutout($result->productCutout);
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'gemini-3.5-flash:')
@@ -656,7 +657,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/share.webp']]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         // The product was redrawn from the imported photo; the unchecked later photo was never fetched.
         $this->assertSame([20, 16], array_slice(getimagesizefromstring((string) $result->productCutout), 0, 2));
@@ -683,7 +684,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/share.jpg']]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         // The checked redraw was used, not the imported photo's own cutout.
         $this->assertSame([20, 16], array_slice(getimagesizefromstring((string) $result->productCutout), 0, 2));
@@ -706,7 +707,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         ]);
 
         try {
-            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+            app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
             $this->fail('The redraw call should have failed.');
         } catch (BannerAttemptFailed $exception) {
             $this->assertEqualsWithDelta(app(ProviderCostCalculator::class)->calculate('gemini-3.5-flash', 300, 0, 12), $exception->spentCost, 0.000001);
@@ -731,7 +732,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
 
         // With no other studio shot, the product is lifted out of the photo by the image model instead.
         $this->assertSame([20, 16], array_slice(getimagesizefromstring((string) $result->productCutout), 0, 2));
@@ -771,7 +772,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
 
         // Either way the photo's own pixels, checked as usual; an unusable matte leaves the cutout as cut.
         $this->assertSame('banner-background', $result->imageBytes);
@@ -857,7 +858,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset->id = 2;
         $asset->exists = true;
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate($creative, collect([$asset]));
 
         $this->assertSame(1, collect(Http::recorded())->filter(fn (array $pair) => str_contains($pair[0]->url(), 'gemini-3.1-flash-image:'))->count());
         $this->assertSame('stored-clean-product', $result->productCutout);
@@ -897,7 +898,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset->id = 2;
         $asset->exists = true;
 
-        app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+        app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
 
         $this->assertSame(2, collect(Http::recorded())->filter(fn (array $pair) => str_contains($pair[0]->url(), 'gemini-3.1-flash-image:'))->count());
         $this->assertSame(BannerReferenceImage::key(''), $asset->derivatives['banner_reference_key']);
@@ -928,7 +929,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         // A safety-filtered answer, then bytes that are not an image: both fail, both keep their spend.
         foreach ([1, 2] as $round) {
             try {
-                app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+                app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
                 $this->fail("Cleanup answer {$round} must fail the attempt.");
             } catch (BannerAttemptFailed $exception) {
                 $this->assertSame('vertex_missing_image', $exception->errorCode);
@@ -953,7 +954,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         app(GenerationDeadline::class)->start(72);
 
         try {
-            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+            app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
             $this->fail('A banner must not start its own cleanup while another one holds the lock.');
         } catch (VertexAIResponseException $exception) {
             $this->assertSame('banner_reference_busy', $exception->errorCode);
@@ -993,7 +994,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         ]);
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
 
         $this->assertSame($bigPng, $result->imageBytes);
         $this->assertSame(2, $inspections);
@@ -1035,7 +1036,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
 
         $this->assertSame('background', $result->imageBytes);
         $this->assertSame([3, 1], [$inspections, $images]);
@@ -1064,7 +1065,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
 
         $this->assertSame('clean', $result->imageBytes);
         $calculator = app(ProviderCostCalculator::class);
@@ -1109,7 +1110,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
 
         $this->assertEqualsWithDelta(['x' => 0.74, 'y' => 0.68, 'width' => 0.45], $result->productSpot, 0.0001);
         $scene = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
@@ -1151,7 +1152,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         ]);
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
 
         $this->assertSame('sculpted-stand', $result->imageBytes);
         // Two text checks and two product checks, each priced at the inspector's rates.
@@ -1195,7 +1196,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
 
-        return app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]))->imageBytes;
+        return app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]))->imageBytes;
     }
 
     public function test_a_cutout_that_does_not_match_the_store_photo_is_never_kept_or_used(): void
@@ -1234,7 +1235,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $asset->exists = true;
 
         try {
-            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+            app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
             $this->fail('A banner must not use a cutout that is not the real product.');
         } catch (BannerAttemptFailed $exception) {
             $this->assertSame('banner_product_mismatch', $exception->errorCode);
@@ -1269,7 +1270,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
 
         // Product copy inside the prompt can contain any phrase, the scene prompt's opening included.
         $prompt = 'Show the product, "'.BannerCopySelector::SCENE_OPENING.'". No text or logos.';
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => $prompt]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => $prompt]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
 
         // No cutout is made or overlaid, so the product is never shown twice.
         $this->assertNull($result->productCutout);
@@ -1296,7 +1297,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+        $result = app(ImageModelBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
 
         $this->assertSame('empty-scene', $result->imageBytes);
         // Scene checks ask whether the product was drawn; the cutout's own check does not.

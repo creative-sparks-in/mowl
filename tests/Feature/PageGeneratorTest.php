@@ -21,6 +21,7 @@ use App\Services\Pages\Writing\PageWriting;
 use GuzzleHttp\Psr7\Response as Psr7Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use RuntimeException;
@@ -249,6 +250,26 @@ class PageGeneratorTest extends TestCase
         $generation = $result['generation'];
         $this->assertSame(['gemini-3.5-flash', 4000, 900], [$generation->model, $generation->input_tokens, $generation->output_tokens]);
         $this->assertEqualsWithDelta((4000 * 2.70 + 900 * 16.20) / 1_000_000, (float) $generation->cost_usd, 0.00001);
+    }
+
+    public function test_openai_writes_the_page_and_a_dated_model_is_priced_as_the_configured_one(): void
+    {
+        config(['pages.writer' => 'openai', 'services.openai.api_key' => 'test-key', 'campaigns.openai.base_url' => 'https://api.openai.com/v1', 'campaigns.openai.model' => 'gpt-5.4-mini']);
+        [$owner, , $page] = $this->fixture();
+        $hero = Document::first($page->document, 'product_hero');
+        Http::fake(['api.openai.com/v1/responses' => Http::response([
+            'model' => 'gpt-5.4-mini-2026-03-17',
+            'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode(['sections' => [$hero['id'] => ['subtitle' => 'Light for late reading']]])]]]],
+            'usage' => ['input_tokens' => 4000, 'output_tokens' => 900],
+        ])]);
+
+        $result = app(PageGenerator::class)->write($page, $owner, null, '', 1);
+
+        Http::assertSentCount(1);
+        $this->assertSame('Light for late reading', Document::first($result['document'], 'product_hero')['settings']['subtitle']);
+        $generation = $result['generation'];
+        $this->assertSame(['gpt-5.4-mini-2026-03-17', 4000, 900], [$generation->model, $generation->input_tokens, $generation->output_tokens]);
+        $this->assertEqualsWithDelta((4000 * 0.75 + 900 * 4.50) / 1_000_000, (float) $generation->cost_usd, 0.00001);
     }
 
     public function test_the_answer_is_dropped_and_the_credit_returned_when_the_page_was_saved_while_the_ai_wrote(): void

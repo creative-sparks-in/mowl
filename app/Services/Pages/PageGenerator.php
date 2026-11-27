@@ -147,8 +147,8 @@ class PageGenerator
         $model = (string) ($writing->model ?: 'unknown');
         $cost = $this->costs->calculate($model, $writing->inputTokens, $writing->cachedInputTokens, $writing->outputTokens);
         if ($cost === 0.0 && $model !== 'mock' && ($writing->inputTokens + $writing->outputTokens) > 0) {
-            // Vertex can report a dated model name; price it as the configured model.
-            $cost = $this->costs->calculate((string) config('campaigns.google.model'), $writing->inputTokens, $writing->cachedInputTokens, $writing->outputTokens);
+            // A provider can report a dated model name; price it as the configured model.
+            $cost = $this->costs->calculate((string) config(config('pages.writer') === 'openai' ? 'campaigns.openai.model' : 'campaigns.google.model'), $writing->inputTokens, $writing->cachedInputTokens, $writing->outputTokens);
         }
         $generation->update([
             'status' => 'completed', 'result_revision' => $result['revision'], 'model' => mb_substr($model, 0, 80),

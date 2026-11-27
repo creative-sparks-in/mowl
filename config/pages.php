@@ -12,8 +12,8 @@ return [
     'wordpress_app_name' => 'MarketingOwl',
     'wordpress_app_id' => '6f1c7a52-3b8e-4d0a-9c55-2e7d1b9f4a60',
 
-    // Who writes page copy: "google" (Gemini on Vertex AI, like launch packs) or "mock" (from the
-    // product brief, no AI). Follows the launch pack generator unless set on its own.
+    // Who writes page copy: "openai" (OpenAI or Azure OpenAI, set by OPENAI_BASE_URL), "google" (Gemini
+    // on Vertex AI) or "mock" (from the product brief, no AI). Follows the launch pack generator unless set on its own.
     'writer' => env('PAGE_WRITER', env('CAMPAIGN_GENERATOR', 'mock')),
 
     // AI runs (page writes and section rewrites) a workspace may start per hour.

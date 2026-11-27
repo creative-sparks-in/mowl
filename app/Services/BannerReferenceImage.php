@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Contracts\BannerModels;
+use App\Exceptions\AiProviderException;
 use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\MediaAsset;
@@ -46,7 +48,7 @@ class BannerReferenceImage
 
     /** A small compressed file can decode to hundreds of MB; photos and cutouts are far below this. */
     public function __construct(
-        private GoogleVertexAIClient $client,
+        private BannerModels $models,
         private ProviderCostCalculator $costs,
         private BannerImageInspector $inspector,
         private ProductPhotoCutout $cutter,
@@ -161,7 +163,7 @@ class BannerReferenceImage
             // picture to redraw from: the import can be a share image of another variant.
             [$mime, $bytes] = $this->mainPhoto ?? [(string) $asset->mime_type, $photo];
             $redrawn = $this->redraw($mime, $bytes, $product, $timeoutSeconds, $brand, $spent);
-        } catch (VertexAIResponseException $exception) {
+        } catch (AiProviderException $exception) {
             // The studio photos' paid checks stay on the banner's cost when the redraw call fails.
             throw $spent > 0 ? new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), round($spent, 6)) : $exception;
         }
@@ -272,8 +274,8 @@ class BannerReferenceImage
         $png = is_string($bytes) && $bytes !== '' ? $this->cutout($bytes, $keyName) : null;
         if ($png === null) {
             // A filtered or malformed answer is still billed for its tokens, and is never cached.
-            $message = 'Vertex AI returned no usable product cutout.';
-            throw $cost + $earlier > 0 ? new BannerAttemptFailed('vertex_missing_image', $message, round($earlier + $cost, 6), is_string($bytes) && $bytes !== '' ? $bytes : null) : new VertexAIResponseException('vertex_missing_image', $message, true);
+            $failure = $this->models->failure('missing_image', 'returned no usable product cutout.');
+            throw $cost + $earlier > 0 ? new BannerAttemptFailed($failure->errorCode, $failure->getMessage(), round($earlier + $cost, 6), is_string($bytes) && $bytes !== '' ? $bytes : null) : $failure;
         }
 
         $cost += $this->check($png, $product, $brand, ['mimeType' => $mimeType, 'data' => base64_encode($photo)], $earlier + $cost);
@@ -305,7 +307,7 @@ class BannerReferenceImage
                     .'Keep the image the same shape.',
                 'image/png', $prepared, $timeoutSeconds,
             );
-        } catch (VertexAIResponseException $exception) {
+        } catch (AiProviderException $exception) {
             report($exception);
 
             return ['png' => $png, 'cost' => 0.0];
@@ -321,34 +323,21 @@ class BannerReferenceImage
     /**
      * One image model call with one photo; the drawn image's bytes (null when it drew none) and its cost.
      *
-     * @return array{0: string|false|null, 1: float}
+     * @return array{0: ?string, 1: float}
      */
     private function drawn(string $prompt, string $mimeType, string $photo, int $timeoutSeconds): array
     {
-        [$response] = $this->client->generateContent([
-            'contents' => [['role' => 'user', 'parts' => [
-                ['text' => $prompt],
-                ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($photo)]],
-            ]]],
-            'generationConfig' => ['responseModalities' => ['TEXT', 'IMAGE']],
-        ], config('campaigns.banners.model'), $timeoutSeconds);
+        $drawn = $this->models->draw($prompt, [['mimeType' => $mimeType, 'data' => base64_encode($photo)]], timeoutSeconds: $timeoutSeconds);
+        // Output with no text/image breakdown is priced as image tokens, so a cleanup is never under-recorded,
+        // and thinking is billed as text output.
+        $cost = $this->costs->calculateBanner(
+            $drawn['input_tokens'],
+            $drawn['output_text_tokens'] + $drawn['thinking_tokens'],
+            $drawn['output_image_tokens'] + $drawn['untagged_output_tokens'],
+            $drawn['model'],
+        );
 
-        $json = $response->json();
-        $details = collect(data_get($json, 'usageMetadata.candidatesTokensDetails', []));
-        $text = (int) $details->filter(fn (array $detail) => strtoupper((string) ($detail['modality'] ?? '')) === 'TEXT')->sum('tokenCount');
-        $image = (int) $details->filter(fn (array $detail) => strtoupper((string) ($detail['modality'] ?? '')) === 'IMAGE')->sum('tokenCount');
-        if ($details->isEmpty()) {
-            // Without a breakdown the output is priced as image tokens, so a cleanup is never under-recorded.
-            $image = (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0);
-        }
-        // Thinking is reported apart from the candidates and billed as text output.
-        $text += (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0);
-        $cost = $this->costs->calculateBanner((int) data_get($json, 'usageMetadata.promptTokenCount', 0), $text, $image);
-        $encoded = collect(data_get($json, 'candidates.0.content.parts', []))
-            ->map(fn (array $part) => data_get($part, 'inlineData.data'))
-            ->first(fn (mixed $data) => is_string($data));
-
-        return [is_string($encoded) ? base64_decode($encoded, true) : null, $cost];
+        return [$drawn['bytes'], $cost];
     }
 
     /**
@@ -365,7 +354,7 @@ class BannerReferenceImage
         if (! config('campaigns.banners.inspect_images')) {
             return 0.0;
         }
-        $model = (string) config('campaigns.google.model');
+        $model = $this->models->visionModel();
         $cost = 0.0;
         try {
             $this->ensureTime();
@@ -384,7 +373,7 @@ class BannerReferenceImage
             }
             $match = $compare ? $this->retried(fn () => $this->inspector->matchesProduct($png, 'image/png', $product, $photo)) : null;
             $cost += $match ? $this->costs->calculate($model, $match['input_tokens'], 0, $match['output_tokens']) : 0.0;
-        } catch (VertexAIResponseException $exception) {
+        } catch (AiProviderException $exception) {
             throw new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), round($spent + $cost, 6));
         }
         if ($match && ! $match['matches']) {
@@ -402,8 +391,8 @@ class BannerReferenceImage
     {
         try {
             return $call();
-        } catch (VertexAIResponseException $exception) {
-            if (! in_array($exception->errorCode, ['vertex_http_429', 'vertex_connection_error'], true) || ! $this->hasTime(10)) {
+        } catch (AiProviderException $exception) {
+            if (! ($exception->rateLimited() || $exception->connectionFailed()) || ! $this->hasTime(10)) {
                 throw $exception;
             }
             Sleep::for(10)->seconds();

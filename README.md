@@ -22,7 +22,7 @@ It supports account registration, private agency workspaces, tenant-scoped brand
 - Provider usage, request IDs, estimated COGS, cache hits, and the $0.50 cost alert stored per job
 - Workspace usage dashboard for credit balance, provider COGS, alerts, and recent generation history
 - Optional image/video uploads with FFmpeg audio extraction and 8–16 deduplicated 512px frame candidates
-- Mock and OpenAI Responses API generators behind the same structured result contract
+- Mock, OpenAI (or Azure OpenAI) and Google Vertex AI generators behind the same structured result contract
 
 ## Run locally
 
@@ -55,6 +55,24 @@ OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
 ```
 
 The OpenAI adapter uses strict structured output and writes the same version payload as the mock driver. Without an API key, page extraction and FFmpeg processing still complete locally and audio transcription remains `pending_credentials`.
+
+### AI provider
+
+Launch packs, landing-page writing, banners (drawing, product cutouts and image checks) and transcription each run on `openai`, `google` or `mock`, set by `CAMPAIGN_GENERATOR`, `PAGE_WRITER` (follows `CAMPAIGN_GENERATOR` unless set) and `BANNER_GENERATOR`. `openai` means any OpenAI-compatible endpoint; production uses Azure OpenAI:
+
+```dotenv
+CAMPAIGN_GENERATOR=openai
+BANNER_GENERATOR=openai
+OPENAI_BASE_URL=https://<resource>.cognitiveservices.azure.com/openai/v1
+OPENAI_API_KEY=
+OPENAI_CAMPAIGN_MODEL=gpt-5.4-mini
+OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
+OPENAI_BANNER_MODELS=gpt-image-2,gpt-image-1.5
+```
+
+Azure deployments must be named after their models. Banner images are drawn by the first model in `OPENAI_BANNER_MODELS`; a model that answers 429 or 503 hands the call to the next one. To go back to Gemini on Vertex AI, set `CAMPAIGN_GENERATOR=google` and `BANNER_GENERATOR=google` (the `GOOGLE_*` settings stay in place) and redeploy.
+
+Without FFmpeg (Vercel's PHP runtime has none) an uploaded image still gets its 512px copy, and a video gets no frames: its sound track is transcribed from the file itself when it is an mp4, m4a, mp3, wav, webm, ogg or flac of at most 25 MB, and marked `skipped_no_ffmpeg` otherwise.
 
 Media uses Laravel's configured filesystem disk. `CAMPAIGN_MEDIA_DISK=local` is the local default; an S3-compatible disk can be selected after its endpoint and credentials are configured. FFmpeg and FFprobe default to Homebrew paths and can be overridden with `FFMPEG_PATH` and `FFPROBE_PATH`.
 

@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Contracts\BannerGenerator;
+use App\Contracts\BannerModels;
 use App\Data\BannerGenerationResult;
+use App\Exceptions\AiProviderException;
 use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
@@ -13,9 +15,9 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
 
-class GoogleVertexBannerGenerator implements BannerGenerator
+class ImageModelBannerGenerator implements BannerGenerator
 {
-    public function __construct(private GoogleVertexAIClient $client, private BannerImageInspector $inspector, private ProviderCostCalculator $costs, private BannerReferenceImage $references) {}
+    public function __construct(private BannerModels $models, private BannerImageInspector $inspector, private ProviderCostCalculator $costs, private BannerReferenceImage $references) {}
 
     /**
      * Generates a scene without the product and returns it with the product cutout for the composer
@@ -80,7 +82,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                     throw new VertexAIResponseException('banner_deadline_after_reference', 'Not enough time was left for a banner after cutting out the product photo.', true);
                 }
             }
-        } catch (VertexAIResponseException $exception) {
+        } catch (AiProviderException $exception) {
             throw $this->withSpend($exception, $usage, $extraCost);
         }
         $failure = null;
@@ -97,10 +99,10 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                     return $this->result($result, $usage, $extraCost, $cutout);
                 }
                 $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $composite), retryHang: true);
-            } catch (VertexAIResponseException $exception) {
-                throw $this->withSpend($exception, $usage, $extraCost);
+            } catch (AiProviderException $exception) {
+                throw $this->withSpend($exception, $usage, $extraCost, $result->model ?? null);
             }
-            $extraCost += $this->costs->calculate((string) config('campaigns.google.model'), $inspection['input_tokens'], 0, $inspection['output_tokens']);
+            $extraCost += $this->costs->calculate($this->models->visionModel(), $inspection['input_tokens'], 0, $inspection['output_tokens']);
             $marks = $inspection['marks'];
             if ($marks !== []) {
                 $failure = ['banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300)];
@@ -118,10 +120,10 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             }
             try {
                 $match = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS, fn () => $this->inspector->matchesProduct($result->imageBytes, $result->mimeType, $product, $photo), retryHang: true);
-            } catch (VertexAIResponseException $exception) {
-                throw $this->withSpend($exception, $usage, $extraCost);
+            } catch (AiProviderException $exception) {
+                throw $this->withSpend($exception, $usage, $extraCost, $result->model);
             }
-            $extraCost += $this->costs->calculate((string) config('campaigns.google.model'), $match['input_tokens'], 0, $match['output_tokens']);
+            $extraCost += $this->costs->calculate($this->models->visionModel(), $match['input_tokens'], 0, $match['output_tokens']);
             if ($match['matches'] && ! $match['split']) {
                 return $this->result($result, $usage, $extraCost, $cutout);
             }
@@ -141,7 +143,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             return $this->result($split, $usage, $extraCost, $cutout);
         }
 
-        throw new BannerAttemptFailed($failure[0] ?? 'banner_third_party_text', $failure[1] ?? 'No generated background passed its checks.', $this->spent($usage, $extraCost), $result->imageBytes ?? null, $usage);
+        throw new BannerAttemptFailed($failure[0] ?? 'banner_third_party_text', $failure[1] ?? 'No generated background passed its checks.', $this->spent($usage, $extraCost, $result->model ?? null), $result->imageBytes ?? null, $usage);
     }
 
     /** @param  array{x: float, y: float, width: float}|null  $spot */
@@ -164,15 +166,15 @@ class GoogleVertexBannerGenerator implements BannerGenerator
     }
 
     /** Images and calls already made in this attempt were paid for, even when a later call fails. */
-    private function withSpend(VertexAIResponseException $exception, array $usage, float $extraCost): \Throwable
+    private function withSpend(AiProviderException $exception, array $usage, float $extraCost, ?string $model = null): \Throwable
     {
-        $spent = $this->spent($usage, $extraCost);
+        $spent = $this->spent($usage, $extraCost, $model);
 
         return $spent > 0 ? new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), $spent, tokens: $usage) : $exception;
     }
 
     /**
-     * Vertex answers 429 when the project's per-minute quota is used up. Retrying at once only burns
+     * The provider answers 429 when the per-minute quota is used up. Retrying at once only burns
      * the job's attempts, so the call waits and tries again while the deadline still leaves $reserveSeconds after the wait.
      */
     private function rateLimited(GenerationDeadline $deadline, int $reserveSeconds, callable $call, bool $retryHang = false): mixed
@@ -182,17 +184,17 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         while (true) {
             try {
                 return $call();
-            } catch (VertexAIResponseException $exception) {
+            } catch (AiProviderException $exception) {
                 $remaining = $deadline->remaining() ?? INF;
                 // A text call that hung with no answer (cURL 28, 0 bytes) was not billed, and failing here
                 // throws away an image that was, so it is asked again at once while the deadline allows.
-                if ($hangRetries > 0 && $exception->errorCode === 'vertex_connection_error' && $remaining >= $reserveSeconds) {
+                if ($hangRetries > 0 && $exception->connectionFailed() && $remaining >= $reserveSeconds) {
                     $hangRetries--;
 
                     continue;
                 }
                 $wait = array_shift($waits);
-                if ($exception->errorCode !== 'vertex_http_429' || $wait === null || $remaining - $wait < $reserveSeconds) {
+                if (! $exception->rateLimited() || $wait === null || $remaining - $wait < $reserveSeconds) {
                     throw $exception;
                 }
                 Sleep::for($wait + random_int(0, 3))->seconds();
@@ -200,60 +202,31 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         }
     }
 
-    private function spent(array $usage, float $extraCost): float
+    // shortcut: rounds drawn by a fallback model are priced at the final image's model, price each round on its own once fallbacks are common.
+    private function spent(array $usage, float $extraCost, ?string $model): float
     {
-        return round($this->costs->calculateBanner($usage[0], $usage[1], $usage[2]) + $extraCost, 6);
+        return round($this->costs->calculateBanner($usage[0], $usage[1], $usage[2], $model) + $extraCost, 6);
     }
 
     /** @param  array{mimeType: string, data: string}|null  $reference */
     private function generateOnce(BannerCreative $creative, ?array $reference): BannerGenerationResult
     {
-        $parts = [['text' => $creative->prompt]];
-        if ($reference) {
-            $parts[] = ['inlineData' => $reference];
-        }
-
-        [$response, $latency] = $this->client->generateContent([
-            'contents' => [['role' => 'user', 'parts' => $parts]],
-            'generationConfig' => [
-                'responseModalities' => ['TEXT', 'IMAGE'],
-                'imageConfig' => [
-                    'aspectRatio' => config('campaigns.banners.aspect_ratio'),
-                    'imageSize' => config('campaigns.banners.image_size'),
-                ],
-            ],
-        ], config('campaigns.banners.model'));
-
-        $json = $response->json();
-        $image = collect(data_get($json, 'candidates.0.content.parts', []))
-            ->first(fn (array $part) => is_string(data_get($part, 'inlineData.data')));
-        $encoded = data_get($image, 'inlineData.data');
-        $bytes = is_string($encoded) ? base64_decode($encoded, true) : false;
-        if (! is_string($bytes) || $bytes === '') {
-            throw new VertexAIResponseException('vertex_missing_image', 'Vertex AI returned no generated banner image.', true);
-        }
-
-        $outputDetails = collect(data_get($json, 'usageMetadata.candidatesTokensDetails', []));
-        $imageTokens = (int) $outputDetails
-            ->filter(fn (array $detail) => strtoupper((string) ($detail['modality'] ?? '')) === 'IMAGE')
-            ->sum('tokenCount');
-        $textTokens = (int) $outputDetails
-            ->filter(fn (array $detail) => strtoupper((string) ($detail['modality'] ?? '')) === 'TEXT')
-            ->sum('tokenCount');
-        if ($outputDetails->isEmpty()) {
-            $textTokens = (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0);
+        $drawn = $this->models->draw((string) $creative->prompt, $reference ? [$reference] : [], banner: true);
+        if (! is_string($drawn['bytes']) || $drawn['bytes'] === '') {
+            throw $this->models->failure('missing_image', 'returned no generated banner image.');
         }
 
         return new BannerGenerationResult(
-            imageBytes: $bytes,
-            mimeType: (string) data_get($image, 'inlineData.mimeType', 'image/png'),
-            provider: 'google',
-            model: (string) config('campaigns.banners.model'),
-            inputTokens: (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
-            outputTextTokens: $textTokens,
-            outputImageTokens: $imageTokens,
-            providerRequestId: $response->header('x-request-id') ?: data_get($json, 'responseId'),
-            providerLatencyMs: $latency,
+            imageBytes: $drawn['bytes'],
+            mimeType: $drawn['mime_type'],
+            provider: $this->models->provider(),
+            model: $drawn['model'],
+            inputTokens: $drawn['input_tokens'],
+            // Output with no text/image breakdown is counted as text.
+            outputTextTokens: $drawn['output_text_tokens'] + $drawn['untagged_output_tokens'],
+            outputImageTokens: $drawn['output_image_tokens'],
+            providerRequestId: $drawn['request_id'],
+            providerLatencyMs: $drawn['latency_ms'],
         );
     }
 

@@ -11,7 +11,8 @@ class BannerGeneratorManager
     {
         return match ($this->providerName()) {
             'mock' => app(MockBannerGenerator::class),
-            'google' => app(GoogleVertexBannerGenerator::class),
+            // One pipeline on either provider; the BannerModels binding picks the models.
+            'google', 'openai' => app(ImageModelBannerGenerator::class),
             default => throw new InvalidArgumentException('Unsupported banner generator: '.$this->providerName()),
         };
     }
@@ -23,8 +24,10 @@ class BannerGeneratorManager
 
     public function model(): ?string
     {
-        return $this->providerName() === 'google'
-            ? (string) config('campaigns.banners.model')
-            : null;
+        return match ($this->providerName()) {
+            'google' => (string) config('campaigns.banners.model'),
+            'openai' => config('campaigns.banners.openai.models')[0] ?? null,
+            default => null,
+        };
     }
 }

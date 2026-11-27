@@ -9,19 +9,17 @@ use App\Exceptions\OpenAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
 use App\Support\GenerationDeadline;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use JsonException;
 use RuntimeException;
 
 class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
 {
+    public function __construct(private OpenAIClient $client) {}
+
     public function generate(Product $product, SourceSnapshot $source, array $page): GenerationResult
     {
-        $apiKey = $this->apiKey();
-        if (! $apiKey) {
+        if (! $this->client->apiKey()) {
             throw new RuntimeException('OPENAI_API_KEY is not configured. Set an OpenAI key or use Vercel AI Gateway with deployment OIDC.');
         }
 
@@ -38,9 +36,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
                     throw new OpenAIResponseException('openai_time_budget', 'Generation stopped to stay inside the request time limit.'.($lastException ? ' Last error: '.$lastException->getMessage() : ''), true);
                 }
                 try {
-                    [$response, $latency] = $this->send($apiKey, $model, $instructions, $userContent);
-
-                    return $this->resultFromResponse($response, $source, $page, $model, $latency);
+                    return $this->resultFromResponse($this->client->respond($this->payload($model, $instructions, $userContent)), $source, $page);
                 } catch (OpenAIResponseException $exception) {
                     $lastException = $exception;
                     Log::warning('OpenAI campaign-pack attempt failed.', ['model' => $model, 'attempt' => $attempt, 'code' => $exception->errorCode, 'message' => $exception->getMessage()]);
@@ -59,41 +55,6 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         }
 
         throw $lastException ?? new RuntimeException('OpenAI generation failed before a response was received.');
-    }
-
-    private function send(string $apiKey, string $model, string $instructions, array $userContent): array
-    {
-        $startedAt = hrtime(true);
-
-        try {
-            $response = Http::withToken($apiKey)
-                ->acceptJson()
-                ->timeout(app(GenerationDeadline::class)->timeout(config('campaigns.openai.timeout_seconds')))
-                ->post(rtrim(config('campaigns.openai.base_url'), '/').'/responses', $this->payload($model, $instructions, $userContent));
-        } catch (ConnectionException $exception) {
-            throw new OpenAIResponseException('openai_connection_error', 'OpenAI connection failed: '.$exception->getMessage(), true);
-        }
-
-        if ($response->failed()) {
-            throw $this->responseException($response);
-        }
-
-        return [$response, (int) round((hrtime(true) - $startedAt) / 1_000_000)];
-    }
-
-    private function apiKey(): ?string
-    {
-        if ($apiKey = config('services.openai.api_key')) {
-            return $apiKey;
-        }
-
-        if (! str_starts_with(rtrim(config('campaigns.openai.base_url'), '/'), 'https://ai-gateway.vercel.sh')) {
-            return null;
-        }
-
-        return config('services.ai_gateway.api_key')
-            ?: config('services.ai_gateway.oidc_token')
-            ?: request()->header('x-vercel-oidc-token');
     }
 
     private function payload(string $model, string $instructions, array $userContent): array
@@ -116,32 +77,22 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
                 ],
             ],
             'text' => [
-                'format' => [
-                    'type' => 'json_schema',
-                    'name' => 'campaign_pack_content',
-                    'description' => 'Evidence-linked ecommerce campaign pack content.',
-                    'strict' => true,
-                    'schema' => $this->schema(),
-                ],
+                'format' => OpenAIClient::jsonFormat('campaign_pack_content', $this->schema(), 'Evidence-linked ecommerce campaign pack content.'),
             ],
         ];
     }
 
-    private function resultFromResponse(Response $response, SourceSnapshot $source, array $page, string $model, int $latency): GenerationResult
+    /** @param  array  $answer  from {@see OpenAIClient::respond()} */
+    private function resultFromResponse(array $answer, SourceSnapshot $source, array $page): GenerationResult
     {
-        $payload = $response->json();
-        if (($payload['status'] ?? null) === 'incomplete') {
+        if ($answer['incomplete']) {
             throw new OpenAIResponseException('openai_incomplete_response', 'OpenAI returned an incomplete campaign-pack response.', true);
         }
-
-        $content = collect($payload['output'] ?? [])
-            ->where('type', 'message')
-            ->flatMap(fn (array $item) => $item['content'] ?? []);
-        if ($content->contains(fn (array $item) => isset($item['refusal']))) {
-            throw new OpenAIResponseException('openai_refusal', 'OpenAI declined the campaign-pack request: '.($content->first(fn (array $item) => isset($item['refusal']))['refusal'] ?? 'Unknown refusal'), false);
+        if ($answer['refusal'] !== null) {
+            throw new OpenAIResponseException('openai_refusal', 'OpenAI declined the campaign-pack request: '.$answer['refusal'], false);
         }
 
-        $outputText = $content->firstWhere('type', 'output_text')['text'] ?? null;
+        $outputText = $answer['text'];
         if (! $outputText) {
             throw new OpenAIResponseException('openai_missing_structured_output', 'OpenAI returned no structured campaign-pack output.', true);
         }
@@ -171,24 +122,12 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             evidence: $evidence,
             complianceFlags: $flags,
             provider: 'openai',
-            model: $payload['model'] ?? $model,
-            inputTokens: (int) data_get($payload, 'usage.input_tokens', 0),
-            cachedInputTokens: (int) data_get($payload, 'usage.input_tokens_details.cached_tokens', 0),
-            outputTokens: (int) data_get($payload, 'usage.output_tokens', 0),
-            providerRequestId: $response->header('x-request-id') ?: ($payload['id'] ?? null),
-            providerLatencyMs: $latency,
-        );
-    }
-
-    private function responseException(Response $response): OpenAIResponseException
-    {
-        $status = $response->status();
-        $message = data_get($response->json(), 'error.message', "OpenAI returned HTTP {$status}.");
-
-        return new OpenAIResponseException(
-            "openai_http_{$status}",
-            "OpenAI request failed ({$status}): {$message}",
-            $status === 408 || $status === 409 || $status === 429 || $status >= 500,
+            model: $answer['model'],
+            inputTokens: $answer['input_tokens'],
+            cachedInputTokens: $answer['cached_input_tokens'],
+            outputTokens: $answer['output_tokens'],
+            providerRequestId: $answer['request_id'],
+            providerLatencyMs: $answer['latency_ms'],
         );
     }
 

@@ -2,19 +2,20 @@
 
 namespace App\Services;
 
+use App\Exceptions\AiProviderException;
 use App\Models\MediaAsset;
 use App\Models\Product;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 use Throwable;
 
 class MediaProcessor
 {
-    public function __construct(private GoogleVertexAIClient $vertex) {}
+    public function __construct(private GoogleVertexAIClient $vertex, private OpenAIClient $openAI) {}
 
     public function processForProduct(Product $product): array
     {
@@ -98,6 +99,10 @@ class MediaProcessor
 
     private function processVideo(MediaAsset $asset, string $sourcePath, string $temporaryDirectory): array
     {
+        if (! $this->ffmpegAvailable()) {
+            return $this->processVideoWithoutFfmpeg($sourcePath);
+        }
+
         $probe = $this->run([
             config('campaigns.media.ffprobe'), '-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', $sourcePath,
         ]);
@@ -172,10 +177,30 @@ class MediaProcessor
     private function processImage(MediaAsset $asset, string $sourcePath, string $temporaryDirectory): array
     {
         $output = $temporaryDirectory.'/image.jpg';
-        $this->run([
-            config('campaigns.media.ffmpeg'), '-hide_banner', '-loglevel', 'error', '-i', $sourcePath,
-            '-vf', 'scale=512:-2:force_original_aspect_ratio=decrease,format=yuvj420p', '-frames:v', '1', '-q:v', '3', $output,
-        ]);
+        $width = 512;
+        if ($this->ffmpegAvailable()) {
+            $this->run([
+                config('campaigns.media.ffmpeg'), '-hide_banner', '-loglevel', 'error', '-i', $sourcePath,
+                '-vf', 'scale=512:-2:force_original_aspect_ratio=decrease,format=yuvj420p', '-frames:v', '1', '-q:v', '3', $output,
+            ]);
+        } else {
+            // Without ffmpeg (Vercel's PHP runtime) GD makes the same 512px-wide JPEG. A small compressed
+            // file can decode to hundreds of MB, so its size is read from the header before it is decoded.
+            $size = @getimagesize($sourcePath) ?: [0, 0];
+            $bytes = (string) file_get_contents($sourcePath);
+            $image = $size[0] > 0 && $size[0] * $size[1] <= ProductImageImporter::MAX_PIXELS ? @imagecreatefromstring($bytes) : false;
+            // A camera JPEG stored on its side is shown turned, so its stored height is what becomes the width.
+            $sideways = function_exists('exif_read_data') && in_array((int) (@exif_read_data($sourcePath)['Orientation'] ?? 1), [5, 6, 7, 8], true);
+            $shownWidth = max(1, $size[$sideways ? 1 : 0]);
+            // Never enlarged: a 10x2000 strip passes the pixel limit, and at 512 wide it would be 512x102400.
+            $width = min($width, $shownWidth);
+            $scaled = $image ? imagescale($image, max(1, (int) round($size[0] * $width / $shownWidth)), max(1, (int) round($size[1] * $width / $shownWidth))) : false;
+            if (! $scaled) {
+                throw new RuntimeException('The image could not be decoded or is too large.');
+            }
+            // Turned after scaling, so no second full-size copy is held. ffmpeg turns it too; GD drops the tag.
+            imagejpeg(ProductPhotoCutout::upright($scaled, $bytes), $output, 85);
+        }
         $path = "campaign-media/{$asset->workspace_id}/{$asset->product_id}/derived/{$asset->content_hash}/image.jpg";
         Storage::disk($asset->disk)->put($path, file_get_contents($output));
 
@@ -184,7 +209,7 @@ class MediaProcessor
                 'disk' => $asset->disk,
                 'path' => $path,
                 'content_hash' => hash_file('sha256', $output),
-                'width' => 512,
+                'width' => $width,
             ]]],
             'metadata' => [],
         ];
@@ -209,32 +234,62 @@ class MediaProcessor
         ]);
     }
 
+    /** Without ffmpeg there are no frames, but the transcription API reads these containers' sound track as they are. */
+    private function processVideoWithoutFfmpeg(string $sourcePath): array
+    {
+        $transcript = null;
+        $transcriptionStatus = 'skipped_no_ffmpeg';
+        if (config('campaigns.generator') !== 'google'
+            && in_array(strtolower(pathinfo($sourcePath, PATHINFO_EXTENSION)), ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'ogg', 'wav', 'webm'], true)
+            && filesize($sourcePath) <= 25 * 1024 * 1024) {
+            [$transcript, $transcriptionStatus] = $this->transcribeIfConfigured($sourcePath);
+        }
+
+        return [
+            'derivatives' => ['frames' => [], 'audio' => null],
+            'metadata' => [
+                'analysis_mode' => 'no_ffmpeg',
+                'duration_seconds' => null,
+                'frame_candidates' => 0,
+                'frames_selected' => 0,
+                'frame_target_met' => false,
+                'transcript' => $transcript,
+                'transcription_status' => $transcriptionStatus,
+            ],
+        ];
+    }
+
     private function transcribeIfConfigured(string $audioFile): array
     {
-        if (config('campaigns.generator') === 'google') {
-            return [$this->vertex->transcribeAudio($audioFile), 'completed'];
+        try {
+            if (config('campaigns.generator') === 'google') {
+                return [$this->vertex->transcribeAudio($audioFile), 'completed'];
+            }
+
+            if (! $this->openAI->apiKey()) {
+                return [null, 'pending_credentials'];
+            }
+
+            return [$this->openAI->transcribe($audioFile), 'completed'];
+        } catch (AiProviderException $exception) {
+            // A failed transcript should not throw away the frames already extracted.
+            report($exception);
+
+            return [null, 'failed'];
+        }
+    }
+
+    /** Each tool is a full path, or a command name found on PATH the way Process resolves it. */
+    private function ffmpegAvailable(): bool
+    {
+        foreach (['ffmpeg', 'ffprobe'] as $tool) {
+            $command = (string) config("campaigns.media.{$tool}");
+            if (! is_executable($command) && (new ExecutableFinder)->find($command) === null) {
+                return false;
+            }
         }
 
-        $apiKey = config('services.openai.api_key');
-        if (! $apiKey) {
-            return [null, 'pending_credentials'];
-        }
-
-        $handle = fopen($audioFile, 'r');
-        $response = Http::withToken($apiKey)
-            ->timeout(120)
-            ->attach('file', $handle, 'audio.wav')
-            ->post(rtrim(config('campaigns.openai.base_url'), '/').'/audio/transcriptions', [
-                'model' => config('campaigns.media.transcription_model'),
-                'response_format' => 'json',
-            ])
-            ->throw();
-
-        if (is_resource($handle)) {
-            fclose($handle);
-        }
-
-        return [$response->json('text'), 'completed'];
+        return true;
     }
 
     private function deduplicateFrames(array $frames): array

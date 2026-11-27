@@ -40,7 +40,7 @@ class BannerGenerationController extends Controller
             return response()->json(['status' => $creative->status], 202);
         }
 
-        // A retry right after a failure (often a Vertex 429) would hit the same limit, so it waits out
+        // A retry right after a failure (often a provider's 429) would hit the same limit, so it waits out
         // the rest of the pause here. The page re-runs the banner as soon as the last attempt returns,
         // and a timer in the page did not survive its 3-second polling.
         if ($creative->status === 'retrying') {
