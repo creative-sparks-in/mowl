@@ -10,6 +10,9 @@ namespace App\Support;
  */
 class VoiceoverTiming
 {
+    /** The fastest a narrator can read a line and still be understood; a faster segment blocks approval. */
+    public const MAX_PACE = 170;
+
     /** Words as a narrator says them: "e-reader", "don't" and "2026" are one word each. */
     public static function words(string $line): int
     {
@@ -24,6 +27,14 @@ class VoiceoverTiming
         $seconds = (float) ($segment['end_seconds'] ?? 0) - (float) ($segment['start_seconds'] ?? 0);
 
         return $seconds > 0 ? (int) round((self::words((string) ($segment['line'] ?? '')) / $seconds) * 60) : null;
+    }
+
+    /** The most words the segment's time range holds at MAX_PACE. */
+    public static function maxWords(array $segment): int
+    {
+        $seconds = (float) ($segment['end_seconds'] ?? 0) - (float) ($segment['start_seconds'] ?? 0);
+
+        return max(0, (int) floor($seconds * self::MAX_PACE / 60));
     }
 
     /** Pack content with every creative route's voiceover recounted. */

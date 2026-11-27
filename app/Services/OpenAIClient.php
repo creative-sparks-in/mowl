@@ -141,6 +141,8 @@ class OpenAIClient
 
         try {
             $response = $request(Http::withToken($apiKey)
+                // Azure documents the resource key in an "api-key" header; it also accepts the bearer form.
+                ->withHeaders(preg_match('#^https://[^/]+\.azure\.com/#', $this->url('/')) ? ['api-key' => $apiKey] : [])
                 ->acceptJson()
                 // Bodies over 1MB (a product photo, a banner sent for inspection) make curl send
                 // "Expect: 100-continue", which some gateways answer with HTTP 417.

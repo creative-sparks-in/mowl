@@ -5,8 +5,10 @@ namespace Tests\Unit;
 use App\Exceptions\OpenAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Services\CampaignPackSafetyValidator;
 use App\Services\MockCampaignPackGenerator;
 use App\Services\OpenAIResponsesCampaignPackGenerator;
+use App\Support\VoiceoverTiming;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -14,6 +16,8 @@ use Tests\TestCase;
 
 class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
 {
+    private const LONG_LINE = 'This opening line has far too many words in it to be spoken clearly inside five short seconds';
+
     public function test_it_requests_strict_structured_output_and_maps_provider_usage(): void
     {
         config()->set('services.openai.api_key', 'test-key');
@@ -131,6 +135,181 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_a_voiceover_line_too_long_for_its_seconds_is_rewritten_within_its_word_budget(): void
+    {
+        $this->configureGenerator();
+        Http::fakeSequence()
+            ->push($this->responsePayload($this->outputWithLongLine()))
+            ->push($this->responsePayload(['rewrites' => [
+                ['id' => 'creative_routes.0.voiceover.0.line', 'text' => 'This opening line now fits its five seconds.'],
+                ['id' => 'overview.summary', 'text' => 'A line nobody asked to change.'],
+            ]]));
+
+        $result = $this->generate();
+
+        $segment = $result->content['creative_routes'][0]['voiceover'][0];
+        $this->assertSame('This opening line now fits its five seconds.', $segment['line']);
+        $this->assertLessThanOrEqual(VoiceoverTiming::MAX_PACE, VoiceoverTiming::pace($segment));
+        $this->assertSame('This opening line now fits its five seconds.', $result->content['creative_routes'][0]['shot_plan'][0]['voiceover_line']);
+        $this->assertStringContainsString('Canvas Tote', $result->content['overview']['summary']);
+        // The rewrite is paid for too.
+        $this->assertSame([2400, 400, 1000], [$result->inputTokens, $result->cachedInputTokens, $result->outputTokens]);
+        Http::assertSentCount(2);
+        $repair = Http::recorded()[1][0];
+        $this->assertSame('line_rewrites', $repair['text']['format']['name']);
+        $this->assertSame('gpt-5.4-mini', $repair['model']);
+        $asked = json_decode($repair['input'][1]['content'][0]['text'], true);
+        $this->assertSame(['creative_routes.0.voiceover.0.line'], array_column($asked, 'id'));
+        $this->assertSame('Too long to say in its 5 seconds. It has 18 words and may have at most 14.', $asked[0]['problem']);
+    }
+
+    public function test_a_line_still_too_long_after_two_rewrites_is_kept_for_a_person(): void
+    {
+        $this->configureGenerator();
+        $unchanged = $this->responsePayload(['rewrites' => [['id' => 'creative_routes.0.voiceover.0.line', 'text' => self::LONG_LINE]]]);
+        Http::fakeSequence()->push($this->responsePayload($this->outputWithLongLine()))->push($unchanged)->push($unchanged);
+
+        $this->assertSame(self::LONG_LINE, $this->generate()->content['creative_routes'][0]['voiceover'][0]['line']);
+        Http::assertSentCount(3);
+    }
+
+    public function test_two_segments_with_the_same_line_each_change_only_their_own_shot(): void
+    {
+        $this->configureGenerator();
+        $output = $this->outputWithLongLine();
+        $output['creative_routes'][0]['voiceover'][1]['line'] = self::LONG_LINE;
+        $output['creative_routes'][0]['shot_plan'][1]['voiceover_line'] = self::LONG_LINE;
+        Http::fakeSequence()
+            ->push($this->responsePayload($output))
+            ->push($this->responsePayload(['rewrites' => [
+                ['id' => 'creative_routes.0.voiceover.0.line', 'text' => 'The first line, now short.'],
+                ['id' => 'creative_routes.0.voiceover.1.line', 'text' => 'The second line, now short.'],
+            ]]));
+
+        $shots = $this->generate()->content['creative_routes'][0]['shot_plan'];
+
+        $this->assertSame(['The first line, now short.', 'The second line, now short.'], [$shots[0]['voiceover_line'], $shots[1]['voiceover_line']]);
+    }
+
+    public function test_a_rewrite_answer_that_cannot_be_read_is_still_counted_as_spent(): void
+    {
+        $this->configureGenerator();
+        $unreadable = $this->responsePayload([]);
+        $unreadable['output'][0]['content'][0]['text'] = 'Sorry, here are the lines: ...';
+        Http::fakeSequence()->push($this->responsePayload($this->outputWithLongLine()))->push($unreadable)->push($unreadable);
+
+        $result = $this->generate();
+
+        $this->assertSame(self::LONG_LINE, $result->content['creative_routes'][0]['voiceover'][0]['line']);
+        $this->assertSame([3600, 600, 1500], [$result->inputTokens, $result->cachedInputTokens, $result->outputTokens]);
+    }
+
+    public function test_a_shot_that_repeats_a_blocked_line_is_rewritten_with_its_segment_not_on_its_own(): void
+    {
+        $this->configureGenerator();
+        $output = $this->campaignOutput();
+        // The price check reads every string, so it blocks the line in the voiceover and again in the shot plan.
+        $output['creative_routes'][0]['voiceover'][0]['line'] = 'Yours today for $45.';
+        $output['creative_routes'][0]['shot_plan'][0]['voiceover_line'] = 'Yours today for $45.';
+        Http::fakeSequence()
+            ->push($this->responsePayload($output))
+            ->push($this->responsePayload(['rewrites' => [['id' => 'creative_routes.0.voiceover.0.line', 'text' => 'Yours today.']]]));
+
+        $route = $this->generate()->content['creative_routes'][0];
+
+        $this->assertSame(['Yours today.', 'Yours today.'], [$route['voiceover'][0]['line'], $route['shot_plan'][0]['voiceover_line']]);
+        Http::assertSentCount(2);
+        $this->assertSame(['creative_routes.0.voiceover.0.line'], array_column(json_decode(Http::recorded()[1][0]['input'][1]['content'][0]['text'], true), 'id'));
+    }
+
+    public function test_a_link_the_check_blocks_is_never_sent_for_rewording(): void
+    {
+        $this->configureGenerator();
+        $url = 'https://example.com/organic/tote';
+        $output = $this->campaignOutput($url);
+        Http::fakeSequence()->push($this->responsePayload($output));
+
+        $result = $this->generate($url);
+
+        // "organic" is in the address and nowhere on the page, so the check blocks the pack's links
+        // and the SMS that carries one. None of them is prose that can be reworded.
+        $blocked = array_column(app(CampaignPackSafetyValidator::class)->issues($result->content, $result->evidence, $result->complianceFlags, new SourceSnapshot(['url' => $url])), 'path');
+        $this->assertContains('marketing_hub.channels.google_ads.search.final_url', $blocked);
+        $this->assertContains('marketing_hub.channels.email_sms.sms_messages.0', $blocked);
+        $this->assertSame($url, $result->content['marketing_hub']['channels']['google_ads']['search']['final_url']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_rewrite_that_changes_a_link_in_the_line_is_not_used(): void
+    {
+        $this->configureGenerator();
+        $output = $this->campaignOutput();
+        $line = $output['marketing_hub']['channels']['email_sms']['sms_messages'][0] = 'Guaranteed to fit your day: https://example.com/tote';
+        $changed = $this->responsePayload(['rewrites' => [['id' => 'marketing_hub.channels.email_sms.sms_messages.0', 'text' => 'Made to fit your day: https://example.com/totes']]]);
+        Http::fakeSequence()->push($this->responsePayload($output))->push($changed)->push($changed);
+
+        $this->assertSame($line, $this->generate()->content['marketing_hub']['channels']['email_sms']['sms_messages'][0]);
+        Http::assertSentCount(3);
+    }
+
+    public function test_a_failed_rewrite_keeps_the_generated_pack(): void
+    {
+        $this->configureGenerator();
+        Http::fakeSequence()->push($this->responsePayload($this->outputWithLongLine()))->push(['error' => ['message' => 'Unavailable']], 503);
+
+        $this->assertSame(self::LONG_LINE, $this->generate()->content['creative_routes'][0]['voiceover'][0]['line']);
+        Http::assertSentCount(2);
+    }
+
+    public function test_unsupported_wording_in_copy_is_rewritten_but_price_fields_are_left_alone(): void
+    {
+        $this->configureGenerator();
+        $output = $this->campaignOutput();
+        $output['creative_routes'][0]['hooks'][0] = 'Guaranteed to fit your day';
+        Http::fakeSequence()
+            ->push($this->responsePayload($output))
+            ->push($this->responsePayload(['rewrites' => [['id' => 'creative_routes.0.hooks.0', 'text' => 'Made to fit your day']]]));
+
+        $result = $this->generate();
+
+        $this->assertSame('Made to fit your day', $result->content['creative_routes'][0]['hooks'][0]);
+        Http::assertSentCount(2);
+        // The snapshot shows no price, so the price fields are blocked too; they are never sent for rewording.
+        $asked = json_decode(Http::recorded()[1][0]['input'][1]['content'][0]['text'], true);
+        $this->assertSame(['creative_routes.0.hooks.0'], array_column($asked, 'id'));
+        $this->assertStringContainsString('"guaranteed"', $asked[0]['problem']);
+    }
+
+    public function test_a_pack_that_records_an_unsafe_claim_is_asked_for_once_more_without_it(): void
+    {
+        $this->configureGenerator();
+        Http::fakeSequence()
+            ->push($this->responsePayload($this->outputWithUnsafeClaim()))
+            ->push($this->responsePayload($this->campaignOutput()));
+
+        $result = $this->generate();
+
+        $this->assertNotContains('unsupported', array_column($result->evidence, 'status'));
+        // Both packs were paid for.
+        $this->assertSame([2400, 400, 1000], [$result->inputTokens, $result->cachedInputTokens, $result->outputTokens]);
+        Http::assertSentCount(2);
+        $this->assertCount(1, Http::recorded()[0][0]['input'][1]['content']);
+        $reason = Http::recorded()[1][0]['input'][1]['content'][1]['text'];
+        $this->assertStringContainsString("- The tote is made in the USA\n", $reason);
+        $this->assertStringContainsString('product_truth.prohibited_claims', $reason);
+    }
+
+    public function test_the_pack_with_an_unsafe_claim_is_kept_when_asking_again_fails(): void
+    {
+        $this->configureGenerator();
+        Http::fakeSequence()
+            ->push($this->responsePayload($this->outputWithUnsafeClaim()))
+            ->push(['error' => ['message' => 'Unavailable']], 503);
+
+        $this->assertContains('unsupported', array_column($this->generate()->evidence, 'status'));
+        Http::assertSentCount(2);
+    }
+
     public function test_it_rejects_a_refusal_without_retrying(): void
     {
         $this->configureGenerator();
@@ -218,11 +397,11 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         config()->set('campaigns.openai.retry_backoff_ms', [0, 0]);
     }
 
-    private function generate()
+    private function generate(string $url = 'https://example.com/tote')
     {
         return app(OpenAIResponsesCampaignPackGenerator::class)->generate(
             new Product(['name' => 'Canvas Tote', 'price' => '$89']),
-            new SourceSnapshot(['url' => 'https://example.com/tote']),
+            new SourceSnapshot(['url' => $url]),
             ['description' => 'Everyday tote', 'content' => 'A roomy canvas tote.', 'product_truth' => ['name' => 'Canvas Tote']],
         );
     }
@@ -244,11 +423,30 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         ];
     }
 
-    private function campaignOutput(): array
+    /** A pack whose first voiceover line has 18 words for a 5-second segment: 216 words per minute. */
+    private function outputWithLongLine(): array
+    {
+        $output = $this->campaignOutput();
+        $output['creative_routes'][0]['voiceover'][0]['line'] = self::LONG_LINE;
+        $output['creative_routes'][0]['shot_plan'][0]['voiceover_line'] = self::LONG_LINE;
+
+        return $output;
+    }
+
+    private function outputWithUnsafeClaim(): array
+    {
+        $output = $this->campaignOutput();
+        $output['evidence'][] = ['id' => 'claim-usa', 'claim' => 'The tote is made in the USA', 'source' => 'https://example.com/tote', 'excerpt' => '', 'status' => 'unsupported'];
+        $output['compliance_flags'][] = ['severity' => 'warning', 'claim' => 'The tote is made in the USA', 'reason' => 'The page names no origin.'];
+
+        return $output;
+    }
+
+    private function campaignOutput(string $url = 'https://example.com/tote'): array
     {
         $result = app(MockCampaignPackGenerator::class)->generate(
             new Product(['name' => 'Canvas Tote', 'price' => '$89']),
-            new SourceSnapshot(['url' => 'https://example.com/tote']),
+            new SourceSnapshot(['url' => $url]),
             ['description' => 'Everyday tote', 'content' => 'A roomy canvas tote.', 'product_truth' => ['name' => 'Canvas Tote']],
         );
 
