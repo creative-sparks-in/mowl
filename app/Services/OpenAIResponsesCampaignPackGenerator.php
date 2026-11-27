@@ -209,25 +209,27 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             }
             try {
                 $answer = $this->client->respond($this->repairPayload($model, $lines));
-                $rewrites = json_decode((string) $answer['text'], true, flags: JSON_THROW_ON_ERROR)['rewrites'] ?? [];
-            } catch (OpenAIResponseException|JsonException $exception) {
+            } catch (OpenAIResponseException $exception) {
                 Log::warning('OpenAI campaign-pack repair failed; the pack is kept as generated.', ['model' => $model, 'round' => $round, 'message' => $exception->getMessage()]);
                 break;
             }
 
+            // An answer is paid for whether or not its rewrites can be read.
             $content = $result->content;
-            foreach (is_array($rewrites) ? $rewrites : [] as $rewrite) {
-                $path = (string) ($rewrite['id'] ?? '');
-                $text = trim((string) ($rewrite['text'] ?? ''));
+            $decoded = json_decode((string) $answer['text'], true);
+            foreach (is_array($decoded) && is_array($decoded['rewrites'] ?? null) ? $decoded['rewrites'] : [] as $rewrite) {
+                $path = is_array($rewrite) ? (string) ($rewrite['id'] ?? '') : '';
+                $text = is_array($rewrite) ? trim((string) ($rewrite['text'] ?? '')) : '';
                 if (! isset($lines[$path]) || $text === '') {
                     continue;
                 }
                 data_set($content, $path, $text);
-                // A shot repeats the voiceover line it is filmed for.
-                if (preg_match('/^creative_routes\.(\d+)\.voiceover\.\d+\.line$/', $path, $route)) {
-                    foreach ($content['creative_routes'][$route[1]]['shot_plan'] ?? [] as $shotIndex => $shot) {
-                        if (($shot['voiceover_line'] ?? null) === $lines[$path]['text']) {
-                            $content['creative_routes'][$route[1]]['shot_plan'][$shotIndex]['voiceover_line'] = $text;
+                // The shot a segment is filmed for repeats its line.
+                if (preg_match('/^creative_routes\.(\d+)\.voiceover\.(\d+)\.line$/', $path, $at)) {
+                    $shotId = $content['creative_routes'][$at[1]]['voiceover'][$at[2]]['shot_id'] ?? null;
+                    foreach ($content['creative_routes'][$at[1]]['shot_plan'] ?? [] as $shotIndex => $shot) {
+                        if (($shot['id'] ?? null) === $shotId && ($shot['voiceover_line'] ?? null) === $lines[$path]['text']) {
+                            $content['creative_routes'][$at[1]]['shot_plan'][$shotIndex]['voiceover_line'] = $text;
                         }
                     }
                 }

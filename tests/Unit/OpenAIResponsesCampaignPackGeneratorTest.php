@@ -172,6 +172,37 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_two_segments_with_the_same_line_each_change_only_their_own_shot(): void
+    {
+        $this->configureGenerator();
+        $output = $this->outputWithLongLine();
+        $output['creative_routes'][0]['voiceover'][1]['line'] = self::LONG_LINE;
+        $output['creative_routes'][0]['shot_plan'][1]['voiceover_line'] = self::LONG_LINE;
+        Http::fakeSequence()
+            ->push($this->responsePayload($output))
+            ->push($this->responsePayload(['rewrites' => [
+                ['id' => 'creative_routes.0.voiceover.0.line', 'text' => 'The first line, now short.'],
+                ['id' => 'creative_routes.0.voiceover.1.line', 'text' => 'The second line, now short.'],
+            ]]));
+
+        $shots = $this->generate()->content['creative_routes'][0]['shot_plan'];
+
+        $this->assertSame(['The first line, now short.', 'The second line, now short.'], [$shots[0]['voiceover_line'], $shots[1]['voiceover_line']]);
+    }
+
+    public function test_a_rewrite_answer_that_cannot_be_read_is_still_counted_as_spent(): void
+    {
+        $this->configureGenerator();
+        $unreadable = $this->responsePayload([]);
+        $unreadable['output'][0]['content'][0]['text'] = 'Sorry, here are the lines: ...';
+        Http::fakeSequence()->push($this->responsePayload($this->outputWithLongLine()))->push($unreadable)->push($unreadable);
+
+        $result = $this->generate();
+
+        $this->assertSame(self::LONG_LINE, $result->content['creative_routes'][0]['voiceover'][0]['line']);
+        $this->assertSame([3600, 600, 1500], [$result->inputTokens, $result->cachedInputTokens, $result->outputTokens]);
+    }
+
     public function test_a_failed_rewrite_keeps_the_generated_pack(): void
     {
         $this->configureGenerator();
