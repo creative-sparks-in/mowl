@@ -954,7 +954,7 @@ class ProductPhotoCutout
     }
 
     /** A JPEG turned the way its camera's orientation tag says it is shown. */
-    private function upright(\GdImage $image, string $bytes): \GdImage
+    public static function upright(\GdImage $image, string $bytes): \GdImage
     {
         if (! function_exists('exif_read_data')) {
             return $image;

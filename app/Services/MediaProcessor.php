@@ -187,14 +187,19 @@ class MediaProcessor
             // Without ffmpeg (Vercel's PHP runtime) GD makes the same 512px-wide JPEG. A small compressed
             // file can decode to hundreds of MB, so its size is read from the header before it is decoded.
             $size = @getimagesize($sourcePath) ?: [0, 0];
-            $image = $size[0] > 0 && $size[0] * $size[1] <= ProductImageImporter::MAX_PIXELS ? @imagecreatefromstring((string) file_get_contents($sourcePath)) : false;
+            $bytes = (string) file_get_contents($sourcePath);
+            $image = $size[0] > 0 && $size[0] * $size[1] <= ProductImageImporter::MAX_PIXELS ? @imagecreatefromstring($bytes) : false;
+            // A camera JPEG stored on its side is shown turned, so its stored height is what becomes the width.
+            $sideways = function_exists('exif_read_data') && in_array((int) (@exif_read_data($sourcePath)['Orientation'] ?? 1), [5, 6, 7, 8], true);
+            $shownWidth = max(1, $size[$sideways ? 1 : 0]);
             // Never enlarged: a 10x2000 strip passes the pixel limit, and at 512 wide it would be 512x102400.
-            $width = min($width, $size[0]);
-            $scaled = $image ? imagescale($image, $width) : false;
+            $width = min($width, $shownWidth);
+            $scaled = $image ? imagescale($image, max(1, (int) round($size[0] * $width / $shownWidth)), max(1, (int) round($size[1] * $width / $shownWidth))) : false;
             if (! $scaled) {
                 throw new RuntimeException('The image could not be decoded or is too large.');
             }
-            imagejpeg($scaled, $output, 85);
+            // Turned after scaling, so no second full-size copy is held. ffmpeg turns it too; GD drops the tag.
+            imagejpeg(ProductPhotoCutout::upright($scaled, $bytes), $output, 85);
         }
         $path = "campaign-media/{$asset->workspace_id}/{$asset->product_id}/derived/{$asset->content_hash}/image.jpg";
         Storage::disk($asset->disk)->put($path, file_get_contents($output));

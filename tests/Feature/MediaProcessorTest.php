@@ -146,6 +146,20 @@ class MediaProcessorTest extends TestCase
         $this->assertGreaterThan(0, count($processed->derivatives['frames']));
     }
 
+    public function test_without_ffmpeg_a_camera_jpeg_stored_on_its_side_is_turned_upright(): void
+    {
+        Storage::fake('local');
+        $this->withoutFfmpeg();
+
+        // Stored 1200 x 800 but shown turned, so it is an 800 x 1200 portrait: 512 x 768, not a sideways 512 x 341.
+        $processed = $this->processedImage(1200, 800, sideways: true);
+
+        $this->assertSame('processed', $processed->status);
+        $derivative = Storage::disk('local')->path($processed->derivatives['images'][0]['path']);
+        $this->assertSame([512, 768, IMAGETYPE_JPEG], array_slice(getimagesize($derivative), 0, 3));
+        $this->assertSame(512, $processed->derivatives['images'][0]['width']);
+    }
+
     public function test_without_ffmpeg_an_image_too_large_to_decode_is_refused_before_decoding(): void
     {
         Storage::fake('local');
@@ -243,12 +257,20 @@ class MediaProcessorTest extends TestCase
         Storage::disk('gcs')->assertExists('originals/video.mp4');
     }
 
-    private function processedImage(int $width = 120, int $height = 80): MediaAsset
+    private function processedImage(int $width = 120, int $height = 80, bool $sideways = false): MediaAsset
     {
         [$workspace, $product] = $this->productFixture();
         $image = imagecreatetruecolor($width, $height);
         $temporary = tempnam(sys_get_temp_dir(), 'mowl-image').'.png';
-        imagepng($image, $temporary);
+        if ($sideways) {
+            imagejpeg($image, $temporary);
+            $jpeg = file_get_contents($temporary);
+            // An Exif block saying the camera was turned: the photo is shown rotated 90 degrees clockwise.
+            $exif = "Exif\0\0MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06\0\0\0\0\0\0";
+            file_put_contents($temporary, substr($jpeg, 0, 2)."\xFF\xE1".pack('n', strlen($exif) + 2).$exif.substr($jpeg, 2));
+        } else {
+            imagepng($image, $temporary);
+        }
         imagedestroy($image);
         Storage::disk('local')->put('originals/image.png', file_get_contents($temporary));
         $asset = MediaAsset::create([
