@@ -81,7 +81,9 @@
     @else
         <div class="row camp-actions">
             <button type="button" class="pill {{ $summary ? 'ghost' : 'pri' }} sm" wire:click="openImport({{ $campaign->id }})">{{ $summary ? 'Import more' : 'Import CSV' }}</button>
-            @if($orderStore)
+            @if($campaign->product->offeringType() !== \App\Enums\OfferingType::Physical)
+                <span class="xs muted">{{ \App\Enums\OfferingType::ORDERS_NOTE }}</span>
+            @elseif($orderStore)
                 <button type="button" class="pill ghost sm" wire:click="pullOrders({{ $campaign->id }})" wire:loading.attr="disabled" wire:target="pullOrders">Pull store orders</button>
             @else
                 <button type="button" class="pill ghost sm" disabled title="Connect a WooCommerce store in Settings to pull orders">Pull store orders</button>

@@ -2,6 +2,7 @@
 
 namespace App\Services\Campaigns;
 
+use App\Enums\OfferingType;
 use App\Models\Campaign;
 use App\Models\CampaignResult;
 use App\Models\StoreConnection;
@@ -58,6 +59,9 @@ class CampaignResults
     public function importStoreOrders(Campaign $campaign, User $actor): CampaignResult
     {
         $this->assertLaunched($campaign);
+        if ($campaign->product()->firstOrFail()->offeringType() !== OfferingType::Physical) {
+            throw ValidationException::withMessages(['store' => OfferingType::ORDERS_NOTE]);
+        }
         $store = $this->orderStore($campaign);
         if (! $store) {
             throw ValidationException::withMessages(['store' => 'Connect a WooCommerce store in Settings to pull orders. The sandbox store does not take orders.']);
@@ -107,6 +111,9 @@ class CampaignResults
     /** The WooCommerce store orders are read from: the campaign page's store, else the brand's first one. */
     public function orderStore(Campaign $campaign): ?StoreConnection
     {
+        if ($campaign->product()->firstOrFail()->offeringType() !== OfferingType::Physical) {
+            return null;
+        }
         $page = $campaign->page()->with('storeConnection')->first();
         if ($page?->storeConnection && $this->sellsOnline($page->storeConnection)) {
             return $page->storeConnection;

@@ -22,7 +22,7 @@
             @endif
         </div>
     @empty
-        @unless($formOpen)<div class="empty"><strong>No stores connected</strong><span class="small muted">Connect a WooCommerce store to publish landing pages, or add the sandbox store to try publishing first.</span></div>@endunless
+        @unless($formOpen)<div class="empty"><strong>No stores connected</strong><span class="small muted">Connect your WordPress site to publish landing pages, or add the sandbox store to try publishing first.</span></div>@endunless
     @endforelse
 
     @if($formOpen)
@@ -30,7 +30,7 @@
             <div class="field full">
                 <label for="store-driver">Store type</label>
                 <select id="store-driver" class="input" wire:model.live="driver" @disabled($editingId)>
-                    <option value="woocommerce">WooCommerce (WordPress)</option>
+                    <option value="woocommerce">WordPress (with or without WooCommerce)</option>
                     <option value="sandbox">Sandbox store, for trying publishing</option>
                 </select>
             </div>

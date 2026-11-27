@@ -10,10 +10,7 @@ use App\Models\StoreConnection;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Pages\PageBuilder;
-use App\Services\Pages\PagePublisher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -21,45 +18,26 @@ class OfferingTypePublishingTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_software_and_services_see_only_sandbox_stores_and_physical_products_see_woocommerce_too(): void
+    public function test_every_type_sees_wordpress_and_sandbox_stores_and_the_wordpress_store_comes_first(): void
     {
-        [, $workspace, $software] = $this->fixture('software');
+        [$owner, $workspace, $software] = $this->fixture('software');
         $physical = $software->brand->products()->create(['name' => 'Desk Stand', 'offering_type' => 'physical']);
         $service = $software->brand->products()->create(['name' => 'Setup Call', 'offering_type' => 'service']);
         [$woo, $sandbox] = $this->stores($workspace);
         $builder = app(PageBuilder::class);
 
-        $this->assertSame([$sandbox->id], $builder->stores($software)->modelKeys());
-        $this->assertSame([$sandbox->id], $builder->stores($service)->modelKeys());
-        $this->assertSame($sandbox->id, $builder->defaultStore($software)?->id);
-        $this->assertEqualsCanonicalizing([$woo->id, $sandbox->id], $builder->stores($physical)->modelKeys());
-        $this->assertSame($woo->id, $builder->defaultStore($physical)?->id);
-    }
-
-    public function test_a_software_page_is_never_sent_to_a_woocommerce_store_chosen_before_its_type_changed(): void
-    {
-        Http::fake();
-        [$owner, $workspace, $product] = $this->fixture('software');
-        [$woo] = $this->stores($workspace);
-        $page = app(PageBuilder::class)->start($product, $owner);
-        $page->update(['store_connection_id' => $woo->id]);
-
-        try {
-            app(PagePublisher::class)->publish($page->fresh(), $owner);
-            $this->fail('A software page was published to a WooCommerce store.');
-        } catch (ValidationException $exception) {
-            $this->assertSame(OfferingType::PUBLISHING_NOTE, $exception->errors()['publish'][0]);
+        foreach ([$software, $service, $physical] as $product) {
+            $this->assertEqualsCanonicalizing([$woo->id, $sandbox->id], $builder->stores($product)->modelKeys());
+            $this->assertSame($woo->id, $builder->defaultStore($product)?->id);
         }
-
-        Http::assertNothingSent();
-        $this->assertSame(0, $page->attempts()->count());
-        $this->assertSame('idle', $page->fresh()->publish_state);
-        Livewire::actingAs($owner)->test(PageEditor::class, ['product' => $product, 'page' => $page->fresh()])
-            ->call('chooseStore', (string) $woo->id)
-            ->assertNotFound();
+        $page = $builder->start($software, $owner);
+        Livewire::actingAs($owner)->test(PageEditor::class, ['product' => $software, 'page' => $page])
+            ->call('chooseStore', (string) $sandbox->id)->assertHasNoErrors()
+            ->call('chooseStore', (string) $woo->id)->assertHasNoErrors();
+        $this->assertSame($woo->id, $page->fresh()->store_connection_id);
     }
 
-    public function test_the_publishing_note_shows_in_the_drawer_and_on_the_pages_tab_for_software_only(): void
+    public function test_the_publishing_note_shows_in_the_publish_drawer_for_software_only(): void
     {
         [$owner, $workspace, $software] = $this->fixture('software');
         $this->stores($workspace);
@@ -69,10 +47,10 @@ class OfferingTypePublishingTest extends TestCase
             ->call('openDrawer')
             ->assertSee(OfferingType::PUBLISHING_NOTE)
             ->assertSee('Sandbox')
-            ->assertDontSee('Corner Shop');
+            ->assertSee('Corner Shop');
         Livewire::actingAs($owner)->test(ProductPages::class, ['productId' => $software->id])
             ->assertSee('then publish it to your store.')
-            ->assertSee(OfferingType::PUBLISHING_NOTE);
+            ->assertDontSee(OfferingType::PUBLISHING_NOTE);
 
         $physical = $software->brand->products()->create(['name' => 'Desk Stand', 'offering_type' => 'physical']);
         $physicalPage = app(PageBuilder::class)->start($physical, $owner);
