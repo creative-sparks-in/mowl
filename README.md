@@ -72,6 +72,8 @@ OPENAI_BANNER_MODELS=gpt-image-2,gpt-image-1.5
 
 Azure deployments must be named after their models. Banner images are drawn by the first model in `OPENAI_BANNER_MODELS`; a model that answers 429 or 503 hands the call to the next one. To go back to Gemini on Vertex AI, set `CAMPAIGN_GENERATOR=google` and `BANNER_GENERATOR=google` (the `GOOGLE_*` settings stay in place) and redeploy.
 
+On `openai`, a launch pack is held to the approval rules while it is written. A voiceover line too long for its seconds, or copy with wording the product page does not support, is sent back for a rewrite (two small requests at most), and a pack that records an unsafe claim of its own is asked for once more without it. A pack that still fails is saved as it is, with its blockers shown for a person to fix.
+
 Without FFmpeg (Vercel's PHP runtime has none) an uploaded image still gets its 512px copy, and a video gets no frames: its sound track is transcribed from the file itself when it is an mp4, m4a, mp3, wav, webm, ogg or flac of at most 25 MB, and marked `skipped_no_ffmpeg` otherwise.
 
 Media uses Laravel's configured filesystem disk. `CAMPAIGN_MEDIA_DISK=local` is the local default; an S3-compatible disk can be selected after its endpoint and credentials are configured. FFmpeg and FFprobe default to Homebrew paths and can be overridden with `FFMPEG_PATH` and `FFPROBE_PATH`.

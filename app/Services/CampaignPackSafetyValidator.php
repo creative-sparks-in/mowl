@@ -23,7 +23,8 @@ class CampaignPackSafetyValidator
         'saving' => ['save(?:\\s+now)?|saving', 'off'],
     ];
 
-    private const CURRENCY_CODES = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD', 'AED', 'NZD', 'CHF', 'CNY', 'HKD', 'SAR', 'MYR', 'ZAR', 'SEK', 'NOK', 'DKK', 'BRL', 'MXN', 'IDR', 'THB', 'PHP', 'KRW', 'QAR', 'NPR', 'LKR', 'BDT', 'PKR'];
+    /** PHP is left out: "PHP 7.4" is a software version on any page not priced in pesos, and such a page adds its own currency. */
+    private const CURRENCY_CODES = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD', 'AED', 'NZD', 'CHF', 'CNY', 'HKD', 'SAR', 'MYR', 'ZAR', 'SEK', 'NOK', 'DKK', 'BRL', 'MXN', 'IDR', 'THB', 'KRW', 'QAR', 'NPR', 'LKR', 'BDT', 'PKR'];
 
     private const UNSAFE_STATUSES = [
         'too_specific_for_evidence',
@@ -57,10 +58,7 @@ class CampaignPackSafetyValidator
     {
         $issues = [];
         $safeEvidence = collect($evidence)->filter(fn (array $reference) => in_array($reference['status'] ?? '', ['directly_supported', 'supported_paraphrased', 'source-linked'], true));
-        $sourceText = $this->normalize(implode("\n", array_filter([
-            $source?->extracted_content,
-            CampaignPackEvidence::json($source?->extracted_truth ?? []),
-        ])));
+        $sourceText = CampaignPackEvidence::sourceText($source?->extracted_content, $source?->extracted_truth);
 
         if ($source && (! $source->approved_at || $source->status !== 'ready')) {
             $issues[] = $this->issue('source', 'Product Truth must be owner-approved before this version can be approved.');
@@ -197,7 +195,7 @@ class CampaignPackSafetyValidator
                 if ($start < $previousEnd || $start < 0 || $start >= $duration || $end <= $start || $end > $duration) {
                     $issues[] = $this->issue('timing', "{$routeName} voiceover segment ".($segmentIndex + 1).' has an impossible time range.');
                 }
-                if ($pace > 170) {
+                if ($pace > VoiceoverTiming::MAX_PACE) {
                     $issues[] = $this->issue('timing', "{$routeName} voiceover segment ".($segmentIndex + 1)." requires {$pace} words per minute.");
                 }
                 $previousEnd = max($previousEnd, $end);

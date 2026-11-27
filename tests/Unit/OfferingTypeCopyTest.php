@@ -88,7 +88,10 @@ class OfferingTypeCopyTest extends TestCase
             app(OpenAIResponsesCampaignPackGenerator::class)->generate($this->product($type), $this->source(), $this->page());
 
             $this->assertCount($index + 1, $sent);
-            $this->assertPrompt($type, $sent[$index]['input'][0]['content'][0]['text'], $sent[$index]['input'][1]['content'][0]['text']);
+            // The shared instructions come first, then the rules only gpt-5.4-mini needs.
+            [$shared, $own] = explode("\n\nWord budget for voiceover:", $sent[$index]['input'][0]['content'][0]['text'], 2);
+            $this->assertStringContainsString('never write more than 2.5', $own);
+            $this->assertPrompt($type, $shared, $sent[$index]['input'][1]['content'][0]['text']);
         }
     }
 

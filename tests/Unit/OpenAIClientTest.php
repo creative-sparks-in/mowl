@@ -92,6 +92,9 @@ class OpenAIClientTest extends TestCase
             'https://x.cognitiveservices.azure.com/openai/deployments/gpt-4o-mini-transcribe/audio/transcriptions?api-version=2024-10-21',
             'https://api.openai.com/v1/audio/transcriptions',
         ], $urls);
+        // Azure gets its key in the documented "api-key" header as well; no other host does.
+        $this->assertSame([['test-key'], []], Http::recorded()->map(fn (array $pair) => $pair[0]->header('api-key'))->all());
+        $this->assertTrue(Http::recorded()->every(fn (array $pair) => $pair[0]->hasHeader('Authorization', 'Bearer test-key')));
         unlink($path);
     }
 

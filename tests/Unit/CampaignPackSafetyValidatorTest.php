@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Models\SourceSnapshot;
+use App\Services\CampaignPackEvidence;
 use App\Services\CampaignPackFinalizer;
 use App\Services\CampaignPackSafetyValidator;
 use Tests\TestCase;
@@ -100,6 +101,44 @@ class CampaignPackSafetyValidatorTest extends TestCase
         $issues = app(CampaignPackSafetyValidator::class)->issues($this->safeContent(), $evidence, [], $this->source());
 
         $this->assertSame([], $issues);
+    }
+
+    public function test_a_quote_that_runs_over_a_line_break_in_the_page_description_is_on_the_page(): void
+    {
+        $source = $this->source();
+        $source->extracted_truth = ['description' => "The kit includes:\n\n30 Today cards,\n2 Next Day cards"];
+        $evidence = [[
+            'id' => 'claim-1',
+            'claim' => 'The kit includes 30 Today cards and 2 Next Day cards',
+            'source' => 'https://example.com/product',
+            'excerpt' => '30 Today cards, 2 Next Day cards',
+            'status' => 'directly_supported',
+        ]];
+
+        $this->assertSame([], app(CampaignPackSafetyValidator::class)->issues($this->safeContent(), $evidence, [], $source));
+        // Generation accepts the same quote from the same text, so the two checks cannot disagree on it.
+        $this->assertStringContainsString('30 today cards, 2 next day cards', CampaignPackEvidence::sourceText($source->extracted_content, $source->extracted_truth));
+    }
+
+    public function test_a_php_version_is_not_read_as_a_price_unless_the_page_is_priced_in_pesos(): void
+    {
+        $evidence = [[
+            'id' => 'claim-1',
+            'claim' => 'Made, sourced, or packed in India',
+            'source' => 'https://example.com/product',
+            'excerpt' => 'Made, sourced, or packed in India.',
+            'status' => 'directly_supported',
+        ]];
+        $content = $this->safeContent() + ['overview' => ['summary' => 'Compatible with PHP 7.4 to 8.5.']];
+        $source = $this->source();
+        $source->extracted_truth = ['description' => 'Made, sourced, or packed in India.', 'price' => '49.00', 'currency' => 'USD'];
+
+        $this->assertSame([], app(CampaignPackSafetyValidator::class)->issues($content, $evidence, [], $source));
+
+        $source->extracted_truth = ['description' => 'Made, sourced, or packed in India.', 'price' => '499.00', 'currency' => 'PHP'];
+        $content['overview']['summary'] = 'Yours for PHP 899.';
+
+        $this->assertStringContainsString('states a price the product page does not show (899)', app(CampaignPackSafetyValidator::class)->issues($content, $evidence, [], $source)[0]['message']);
     }
 
     private function source(): SourceSnapshot

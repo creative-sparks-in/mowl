@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\SourceSnapshot;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -27,11 +28,7 @@ class CampaignPackEvidence
     public function check(array $generated, array $evidence, array $flags, SourceSnapshot $source, array $page): array|string
     {
         $allowedSources = array_map(fn ($url) => self::url((string) $url), array_filter([$source->url, $page['url'] ?? null, $page['canonical_url'] ?? null]));
-        $sourceText = self::normalize(implode("\n", [
-            $page['description'] ?? '',
-            $page['content'] ?? '',
-            self::json($page['product_truth'] ?? []),
-        ]));
+        $sourceText = self::sourceText(($page['description'] ?? '')."\n".($page['content'] ?? ''), $page['product_truth'] ?? []);
         $teamText = self::normalize(implode("\n", array_map(fn ($value) => is_array($value) ? self::json($value) : (string) $value, $page['team_knowledge'] ?? [])));
         $flaggedClaims = collect($flags)->pluck('claim')->map(fn ($claim) => self::normalize((string) $claim));
         $kept = [];
@@ -91,6 +88,16 @@ class CampaignPackEvidence
         }
 
         return [$generated, $kept];
+    }
+
+    /**
+     * The text a claim may quote, built the same way at generation and at approval: the page content
+     * and its structured truth. The truth counts as JSON, which is how the model reads it, and as plain
+     * values, because JSON escapes line breaks and a quote that runs over one would never match.
+     */
+    public static function sourceText(?string $content, ?array $truth): string
+    {
+        return self::normalize(implode("\n", [(string) $content, self::json($truth ?? []), ...array_filter(Arr::flatten($truth ?? []), 'is_string')]));
     }
 
     /** Case, spacing and typography-insensitive text for substring checks. */
