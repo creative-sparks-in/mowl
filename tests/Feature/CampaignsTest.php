@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OfferingType;
 use App\Livewire\CampaignIndex;
 use App\Livewire\ProductCampaigns;
 use App\Models\Campaign;
@@ -155,6 +156,30 @@ class CampaignsTest extends TestCase
             ->assertSee($campaign->name)
             ->assertSee('AI generation usage · kept separate')
             ->assertSee('1.92%');
+    }
+
+    public function test_store_orders_are_not_pulled_for_software_or_services(): void
+    {
+        Http::fake();
+        [$owner, $workspace, $pack] = $this->fixture();
+        $pack->product->brand->update(['offering_type' => 'software']);
+        $campaign = $this->launched($owner, $pack, ['starts_on' => now()->subDays(2)->format('Y-m-d')]);
+        StoreConnection::create([
+            'workspace_id' => $workspace->id, 'name' => 'Northline store', 'driver' => 'woocommerce', 'site_url' => 'https://shop.test',
+            'api_base' => 'https://shop.test/wp-json/', 'username' => 'manager', 'secret' => 'abcd abcd', 'has_woocommerce' => true, 'status' => 'connected',
+        ]);
+
+        $this->assertNull(app(CampaignResults::class)->orderStore($campaign));
+        Livewire::actingAs($owner)->test(ProductCampaigns::class, ['productId' => $pack->product_id, 'mode' => 'results'])
+            ->assertSee(OfferingType::ORDERS_NOTE)
+            ->assertDontSee('Pull store orders');
+        Livewire::actingAs($owner)->test(ProductCampaigns::class, ['productId' => $pack->product_id])
+            ->call('pullOrders', $campaign->id)
+            ->assertHasErrors('store')
+            ->assertSee(OfferingType::ORDERS_NOTE);
+
+        Http::assertNothingSent();
+        $this->assertSame(0, $campaign->results()->count());
     }
 
     public function test_store_orders_are_pulled_from_woocommerce_and_combine_with_imported_visits(): void
